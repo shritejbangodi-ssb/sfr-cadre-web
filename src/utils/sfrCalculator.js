@@ -26,9 +26,16 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs) => {
     
     // Count roles for cadre marks (using their current designation)
     const designation = (f.Designation || '').toLowerCase();
-    if (designation.includes('assistant')) depts[dept].asstProfs++;
-    else if (designation.includes('associate')) depts[dept].assocProfs++;
-    else if (designation.includes('professor') || designation.includes('prof')) depts[dept].profs++;
+    const isAsst = designation.includes('assistant') || designation.includes('asst');
+    const isAssoc = designation.includes('associate') || designation.includes('assoc');
+    const temp = designation
+      .replace(/(assistant|asst)\s*prof(essor)?/g, '')
+      .replace(/(associate|assoc)\s*prof(essor)?/g, '');
+    const isProf = temp.includes('professor') || temp.includes('prof');
+
+    if (isAsst) depts[dept].asstProfs++;
+    if (isAssoc) depts[dept].assocProfs++;
+    if (isProf) depts[dept].profs++;
   });
   
   Object.keys(depts).forEach(dept => {
