@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserSquare2, Building2, TrendingUp } from 'lucide-react';
+import { Users, Building2, TrendingUp, CalendarRange } from 'lucide-react';
 import { 
   ResponsiveContainer, 
   BarChart, 
@@ -14,37 +14,59 @@ import {
 } from 'recharts';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../services/firebase';
-import { calculateNBA_SFR } from '../utils/sfrCalculator';
+import {
+  calculateNBA_SFR,
+  getAcademicYearsInRange,
+  getCurrentAcademicYearStart,
+  formatAcademicYear,
+  buildCAYDetails,
+} from '../utils/sfrCalculator';
 import Header from '../components/Header';
 import './Dashboard.css';
 
+const defaultEndStart = getCurrentAcademicYearStart();
+const defaultStartYear = defaultEndStart - 2;
+
 const Dashboard = () => {
+  const [startYear, setStartYear] = useState(formatAcademicYear(defaultStartYear, true));
+  const [endYear, setEndYear] = useState(formatAcademicYear(defaultEndStart, true));
+
   const [stats, setStats] = useState({
     totalStudents: 0,
-    totalFaculty: 0,
     totalDepartments: 0,
     overallSFR: '0.0',
   });
 
   const [sfrData, setSfrData] = useState([]);
+  const [cayDetails, setCayDetails] = useState([]);
+
+  const targetYears = getAcademicYearsInRange(startYear, endYear);
+
+  const handleStartYearChange = (e) => {
+    const value = e.target.value;
+    setStartYear(value);
+
+    const start = parseInt(value.match(/\d{4}/)?.[0] || '0', 10);
+    if (start) {
+      setEndYear(formatAcademicYear(start + 2, true));
+    }
+  };
 
   useEffect(() => {
     let unsubFaculty;
-    
-    // Listen to Students
+
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
       const studentDocs = snap.docs.map(doc => doc.data());
-      
-      // Listen to Faculty
+
       const fetchFacultyAndBuildStats = () => {
         unsubFaculty = onSnapshot(collection(db, 'faculty_members'), (facSnap) => {
           const facultyDocs = facSnap.docs.map(f => f.data());
-          
-          const calculatedDepts = calculateNBA_SFR(studentDocs, facultyDocs);
+          const years = getAcademicYearsInRange(startYear, endYear);
+
+          const calculatedDepts = calculateNBA_SFR(studentDocs, facultyDocs, years);
           const deptArray = Object.values(calculatedDepts).filter(d => d.department !== 'UNKNOWN');
 
           let totalStudents = 0;
-          let totalFaculty = 0;
           let sumAverages = 0;
           let validDepts = 0;
 
@@ -52,7 +74,6 @@ const Dashboard = () => {
 
           deptArray.forEach(d => {
             totalStudents += d.totalStudents3Years;
-            totalFaculty += d.maxFacultySeen;
             if (d.averageSFR > 0) {
               sumAverages += d.averageSFR;
               validDepts++;
@@ -67,16 +88,15 @@ const Dashboard = () => {
 
           setStats({
             totalStudents,
-            totalFaculty,
             totalDepartments: deptArray.length,
             overallSFR: overallAvgSfr === '0.0' ? 'N/A' : overallAvgSfr + ':1'
           });
 
-          // Ensure order/names match screenshot if they exist, or just use default
           setSfrData(chartData);
+          setCayDetails(buildCAYDetails(studentDocs, facultyDocs, years));
         });
       };
-      
+
       fetchFacultyAndBuildStats();
     });
 
@@ -84,29 +104,19 @@ const Dashboard = () => {
       unsubStudents();
       if (unsubFaculty) unsubFaculty();
     };
-  }, []);
+  }, [startYear, endYear]);
 
-  // Safe numerical parser for sparklines
   const parseSFR = (sfrStr) => {
     const parsed = parseFloat(sfrStr);
     return isNaN(parsed) ? 15.0 : parsed;
   };
 
-  // Sparkline dummy data leading to current real-time stats
   const studentsSparkline = [
     { value: Math.max(0, stats.totalStudents - 800) },
     { value: Math.max(0, stats.totalStudents - 600) },
     { value: Math.max(0, stats.totalStudents - 300) },
     { value: Math.max(0, stats.totalStudents - 150) },
     { value: stats.totalStudents }
-  ];
-
-  const facultySparkline = [
-    { value: Math.max(0, stats.totalFaculty - 15) },
-    { value: Math.max(0, stats.totalFaculty - 8) },
-    { value: Math.max(0, stats.totalFaculty - 12) },
-    { value: Math.max(0, stats.totalFaculty - 3) },
-    { value: stats.totalFaculty }
   ];
 
   const deptsSparkline = [
@@ -125,16 +135,76 @@ const Dashboard = () => {
     { value: parseSFR(stats.overallSFR) }
   ];
 
+  const renderSFRReferenceLabel = (value, color) => (props) => {
+    const { viewBox } = props;
+    if (!viewBox) return null;
+    const { x, y, width } = viewBox;
+    const rightX = x + width;
+    const label = `${value}:1`;
+    const badgeWidth = label.length > 4 ? 38 : 32;
+
+    return (
+      <g>
+        <rect
+          x={rightX - badgeWidth - 3}
+          y={y - 8}
+          width={badgeWidth}
+          height={16}
+          rx={8}
+          fill={color}
+        />
+        <text
+          x={rightX - badgeWidth / 2 - 3}
+          y={y + 4}
+          fill="#ffffff"
+          fontSize={9}
+          fontWeight="700"
+          textAnchor="middle"
+        >
+          {label}
+        </text>
+      </g>
+    );
+  };
+
+  const yearRangeSelector = (
+    <div className="year-range-selector">
+      <CalendarRange size={16} className="year-range-icon" />
+      <div className="year-range-fields">
+        <label className="year-range-field">
+          <span>Start Year</span>
+          <input
+            type="text"
+            className="year-range-input"
+            value={startYear}
+            onChange={handleStartYearChange}
+            placeholder="2023-24"
+          />
+        </label>
+        <label className="year-range-field">
+          <span>End Year</span>
+          <input
+            type="text"
+            className="year-range-input"
+            value={endYear}
+            onChange={(e) => setEndYear(e.target.value)}
+            placeholder="2025-26"
+          />
+        </label>
+      </div>
+    </div>
+  );
+
   return (
     <div className="dashboard-view">
       <Header 
         title="Overview Dashboard" 
-        subtitle="Real-time academic performance analytics" 
+        subtitle="Real-time academic performance analytics"
+        actions={yearRangeSelector}
       />
 
       <div className="stats-grid">
-        {/* Card 1: Total Students */}
-        <div className="stat-card">
+        <div className="stat-card dashboard-block">
           <div className="stat-header">
             <span className="stat-label">Total Students</span>
             <div className="stat-icon-wrapper students">
@@ -164,39 +234,36 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Card 2: Total Faculty */}
-        <div className="stat-card">
-          <div className="stat-header">
-            <span className="stat-label">Total Faculty</span>
-            <div className="stat-icon-wrapper faculty">
-              <UserSquare2 size={20} />
+        <div className="cay-details-card dashboard-block">
+          <div className="cay-details-header">
+            <h4>CAY Details</h4>
+            <span className="cay-details-range">
+              {startYear} – {endYear}
+            </span>
+          </div>
+          {cayDetails.length > 0 ? (
+            <div className="cay-details-table">
+              <div className="cay-details-row cay-details-head">
+                <span>Year</span>
+                <span>Academic Year</span>
+                <span>Students</span>
+                <span>Faculty</span>
+              </div>
+              {cayDetails.map((row) => (
+                <div key={row.label} className="cay-details-row">
+                  <span className="cay-label">{row.label}</span>
+                  <span>{row.academicYear}</span>
+                  <span className="cay-count">{row.students}</span>
+                  <span className="cay-count">{row.faculty}</span>
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="stat-value">{stats.totalFaculty || 108}</div>
-          <div className="stat-sparkline">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={facultySparkline} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="sparklineFaculty" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
-                  </linearGradient>
-                </defs>
-                <Area 
-                  type="monotone" 
-                  dataKey="value" 
-                  stroke="#10b981" 
-                  strokeWidth={1.5} 
-                  fillOpacity={1} 
-                  fill="url(#sparklineFaculty)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          ) : (
+            <p className="cay-details-empty">Set a valid 3-year academic range above.</p>
+          )}
         </div>
 
-        {/* Card 3: Total Departments */}
-        <div className="stat-card">
+        <div className="stat-card dashboard-block">
           <div className="stat-header">
             <span className="stat-label">Total Departments</span>
             <div className="stat-icon-wrapper departments">
@@ -226,8 +293,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Card 4: Overall SFR */}
-        <div className="stat-card">
+        <div className="stat-card dashboard-block">
           <div className="stat-header">
             <span className="stat-label">Overall SFR</span>
             <div className="stat-icon-wrapper sfr">
@@ -266,12 +332,8 @@ const Dashboard = () => {
           <div className="chart-header">
             <div className="chart-title-group">
               <h3>Department-wise SFR</h3>
-              <p className="chart-target-badge">Target: 15:1</p>
+              <p className="chart-target-badge">Targets: 15:1 & 25:1 · {targetYears.length} academic years</p>
             </div>
-            <select className="chart-filter-select" defaultValue="this-semester">
-              <option value="this-semester">This Semester</option>
-              <option value="previous-semester">Previous Semester</option>
-            </select>
           </div>
           <div className="chart-body">
             <ResponsiveContainer width="100%" height={320}>
@@ -319,38 +381,17 @@ const Dashboard = () => {
                   labelStyle={{ fontWeight: 'bold', color: '#1e293b' }}
                   itemStyle={{ color: '#2563eb' }}
                 />
-                <ReferenceLine 
-                  y={15} 
-                  stroke="#ef4444" 
-                  strokeDasharray="3 3" 
-                  label={(props) => {
-                    const { viewBox } = props;
-                    if (!viewBox) return null;
-                    const { x, y, width } = viewBox;
-                    const rightX = x + width;
-                    return (
-                      <g>
-                        <rect 
-                          x={rightX - 35} 
-                          y={y - 8} 
-                          width={32} 
-                          height={16} 
-                          rx={8} 
-                          fill="#ef4444" 
-                        />
-                        <text 
-                          x={rightX - 19} 
-                          y={y + 4} 
-                          fill="#ffffff" 
-                          fontSize={9} 
-                          fontWeight="700" 
-                          textAnchor="middle"
-                        >
-                          15:1
-                        </text>
-                      </g>
-                    );
-                  }}
+                <ReferenceLine
+                  y={15}
+                  stroke="#ef4444"
+                  strokeDasharray="3 3"
+                  label={renderSFRReferenceLabel(15, '#ef4444')}
+                />
+                <ReferenceLine
+                  y={25}
+                  stroke="#f59e0b"
+                  strokeDasharray="3 3"
+                  label={renderSFRReferenceLabel(25, '#f59e0b')}
                 />
                 <Bar 
                   dataKey="sfr" 

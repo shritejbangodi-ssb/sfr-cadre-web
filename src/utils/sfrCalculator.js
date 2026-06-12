@@ -3,15 +3,90 @@ export const getYearNumber = (str) => {
   return match ? parseInt(match[0], 10) : 0;
 };
 
-export const calculateNBA_SFR = (studentDocs, facultyDocs) => {
+export const parseAcademicYearStart = (str) => getYearNumber(str);
+
+export const formatAcademicYear = (startYear, short = false) => {
+  const end = startYear + 1;
+  if (short) return `${startYear}-${String(end).slice(-2)}`;
+  return `${startYear}-${end}`;
+};
+
+export const formatAcademicYearShort = (fullYear) => {
+  const start = parseAcademicYearStart(fullYear);
+  return start ? formatAcademicYear(start, true) : fullYear;
+};
+
+export const getCurrentAcademicYearStart = () => {
+  const now = new Date();
+  return now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
+};
+
+export const getAcademicYearsInRange = (startYearInput, endYearInput) => {
+  const start = parseAcademicYearStart(startYearInput);
+  const end = parseAcademicYearStart(endYearInput);
+  if (!start || !end || start > end) return [];
+
+  const years = [];
+  for (let y = start; y <= end; y++) {
+    years.push(formatAcademicYear(y));
+  }
+  return years.sort((a, b) => getYearNumber(b) - getYearNumber(a));
+};
+
+export const matchesAcademicYear = (storedYear, targetYear) => {
+  if (!storedYear || !targetYear) return false;
+  return (
+    storedYear === targetYear ||
+    parseAcademicYearStart(storedYear) === parseAcademicYearStart(targetYear)
+  );
+};
+
+export const countFacultyForYear = (facultyDocs, yearStr, dept = null) => {
+  const startYear = getYearNumber(yearStr);
+  if (startYear === 0) return 0;
+
+  return facultyDocs.filter(f => {
+    if (dept && (f.Department || '').toUpperCase() !== dept) return false;
+
+    const joinYear = parseInt(f.Joining_Year);
+    const leaveYear = parseInt(f.Leaving_Year);
+
+    if (isNaN(joinYear)) return false;
+    if (joinYear > startYear) return false;
+    if (!isNaN(leaveYear) && leaveYear < startYear) return false;
+
+    return true;
+  }).length;
+};
+
+export const countStudentsForYear = (studentDocs, yearStr, dept = null) => {
+  return studentDocs
+    .filter(s => {
+      if (dept && (s.department || '').toUpperCase() !== dept) return false;
+      return matchesAcademicYear(s.academicYear, yearStr);
+    })
+    .reduce((sum, s) => sum + (parseInt(s.noOfStudents) || 0), 0);
+};
+
+export const buildCAYDetails = (studentDocs, facultyDocs, targetYears) => {
+  return targetYears.map((yearStr, idx) => ({
+    label: idx === 0 ? 'CAY' : idx === 1 ? 'CAYM1' : `CAYM${idx}`,
+    academicYear: formatAcademicYearShort(yearStr),
+    students: countStudentsForYear(studentDocs, yearStr),
+    faculty: countFacultyForYear(facultyDocs, yearStr),
+  }));
+};
+
+export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = null) => {
   // Find all academic years
   const allYears = [...new Set(studentDocs.map(s => s.academicYear).filter(Boolean))];
   
   // Sort descending: 2025-2026, 2024-2025, 2023-2024
   allYears.sort((a, b) => getYearNumber(b) - getYearNumber(a));
   
-  // We only care about the latest 3 years for NBA format
-  const targetYears = allYears.slice(0, 3);
+  const targetYears = customTargetYears?.length
+    ? customTargetYears
+    : allYears.slice(0, 3);
   
   const depts = {};
   
@@ -25,7 +100,8 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs) => {
     if (!depts[dept]) depts[dept] = { department: dept, yearlyData: {}, profs: 0, assocProfs: 0, asstProfs: 0 };
     
     // Count roles for cadre marks (using their current designation)
-    const designation = (f.Designation || '').toLowerCase();
+    const rawDesignation = (f.Designation || '').toLowerCase();
+    const designation = rawDesignation === 'professor / associate professor' ? 'professor' : rawDesignation;
     const isAsst = designation.includes('assistant') || designation.includes('asst');
     const isAssoc = designation.includes('associate') || designation.includes('assoc');
     const temp = designation
@@ -51,28 +127,8 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs) => {
       if (startYear === 0) return;
       
       // Students in this year for this dept
-      const sCount = studentDocs
-        .filter(s => (s.department || '').toUpperCase() === dept && s.academicYear === yearStr)
-        .reduce((sum, s) => sum + (parseInt(s.noOfStudents) || 0), 0);
-        
-      // Faculty active in this year for this dept
-      const fCount = facultyDocs.filter(f => {
-        if ((f.Department || '').toUpperCase() !== dept) return false;
-        
-        const joinYear = parseInt(f.Joining_Year);
-        const leaveYear = parseInt(f.Leaving_Year);
-        
-        // **Compulsory rule**: If no valid joining year, they do not count.
-        if (isNaN(joinYear)) return false; 
-        
-        // Did they join after this academic year started?
-        if (joinYear > startYear) return false; 
-        
-        // Did they leave before this academic year started?
-        if (!isNaN(leaveYear) && leaveYear < startYear) return false; 
-        
-        return true;
-      }).length;
+      const sCount = countStudentsForYear(studentDocs, yearStr, dept);
+      const fCount = countFacultyForYear(facultyDocs, yearStr, dept);
       
       const sfr = fCount > 0 ? (sCount / fCount) : 0;
       

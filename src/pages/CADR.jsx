@@ -34,7 +34,8 @@ const CADR = () => {
           const dept = f.Department ? f.Department.toUpperCase() : 'UNKNOWN';
           if (!depts[dept]) depts[dept] = { department: dept, students: 0, profs: 0, assocProfs: 0, asstProfs: 0 };
 
-          const designation = (f.Designation || '').toLowerCase();
+          const rawDesignation = (f.Designation || '').toLowerCase();
+          const designation = rawDesignation === 'professor / associate professor' ? 'professor' : rawDesignation;
           const isAsst = designation.includes('assistant') || designation.includes('asst');
           const isAssoc = designation.includes('associate') || designation.includes('assoc');
           const temp = designation
@@ -47,33 +48,7 @@ const CADR = () => {
           if (isProf) depts[dept].profs++;
         });
 
-        // Compute Cadre Status
-        const processed = Object.values(depts).map(d => {
-          let status = 'N/A';
-          if (d.department === 'PG') {
-            if ((d.profs + d.assocProfs + d.asstProfs) >= 2) {
-              status = 'Satisfied';
-            } else {
-              status = 'Not Satisfied';
-            }
-          } else if (d.students >= 135) {
-            if (d.profs >= 1 && d.assocProfs >= 2 && d.asstProfs >= 6) {
-              status = 'Satisfied';
-            } else {
-              status = 'Not Satisfied';
-            }
-          } else if (d.students > 0) {
-            // For smaller departments, fallback or mark as N/A
-            // But we will be strict: if user wants Satisfied/Not Satisfied, we can say Not Satisfied if they don't meet the ratio.
-            // Let's just use N/A if it's less than 135 since the requirement doesn't apply exactly.
-            status = 'N/A (Under 135)';
-          }
-
-          return {
-            ...d,
-            status
-          };
-        });
+        const processed = Object.values(depts);
 
         processed.sort((a, b) => a.department.localeCompare(b.department));
         setCadrData(processed);
@@ -103,7 +78,6 @@ const CADR = () => {
                 <th>Professors</th>
                 <th>Associate Profs</th>
                 <th>Assistant Profs</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -114,20 +88,11 @@ const CADR = () => {
                     <td className="font-semibold">{row.profs}</td>
                     <td className="font-semibold">{row.assocProfs}</td>
                     <td className="font-semibold">{row.asstProfs}</td>
-                    <td>
-                      {row.status === 'Satisfied' ? (
-                        <span style={{ color: 'var(--color-success)', fontWeight: 600, backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>Satisfied</span>
-                      ) : row.status === 'Not Satisfied' ? (
-                        <span style={{ color: 'var(--color-danger)', fontWeight: 600, backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>Not Satisfied</span>
-                      ) : (
-                        <span className="text-muted font-semibold">{row.status}</span>
-                      )}
-                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5" className="empty-state">No department data available.</td>
+                  <td colSpan="4" className="empty-state">No department data available.</td>
                 </tr>
               )}
             </tbody>

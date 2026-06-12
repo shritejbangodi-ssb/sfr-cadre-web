@@ -1,11 +1,143 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Plus, Upload, Trash2, Edit2, X, ChevronUp, ChevronDown, Filter, RefreshCw } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import * as XLSX from 'xlsx';
 import Header from '../components/Header';
 import './Students.css';
+
+const FACULTY_SYNC_FIELDS = [
+  'Faculty_Name',
+  'Department',
+  'Designation',
+  'Joining_Year',
+  'Leaving_Year',
+  'Highest_Degree',
+];
+
+const normalizeFacultyRecord = (record) => ({
+  Faculty_Name: (record.Faculty_Name || '').trim(),
+  Department: (record.Department || 'Unknown').trim().toUpperCase(),
+  Designation: (record.Designation || '').trim(),
+  Joining_Year: String(record.Joining_Year || '').trim(),
+  Leaving_Year: String(record.Leaving_Year || '').trim(),
+  Highest_Degree: (record.Highest_Degree || '').trim(),
+});
+
+const getFacultySyncKey = (record) => {
+  const normalized = normalizeFacultyRecord(record);
+  return `${normalized.Faculty_Name.toLowerCase()}|${normalized.Department}`;
+};
+
+const facultyRecordsEqual = (existing, incoming) => {
+  const left = normalizeFacultyRecord(existing);
+  const right = normalizeFacultyRecord(incoming);
+  return FACULTY_SYNC_FIELDS.every((field) => left[field] === right[field]);
+};
+
+const DEPARTMENT_ALIASES = {
+  CSCY: 'CYBERSECURITY',
+  CSD: 'CS & DESIGN',
+  PGCC: 'PG',
+};
+
+const KNOWN_DEPARTMENTS = new Set([
+  'CSE', 'ISE', 'CSDS', 'CSBS', 'AIML', 'IOT', 'CYBERSECURITY', 'CS & DESIGN', 'PG',
+]);
+
+const isNumericOnly = (value) => /^\d+$/.test(String(value || '').trim());
+
+const looksLikeName = (value) => {
+  const text = String(value || '').trim();
+  if (!text || text.length < 2) return false;
+  if (isNumericOnly(text)) return false;
+  if (/^(yes|no|na|n\/a)$/i.test(text)) return false;
+  if (/^date of /i.test(text)) return false;
+  return /[A-Za-z]/.test(text);
+};
+
+const normalizeDepartment = (deptVal) => {
+  const upper = deptVal.trim().toUpperCase();
+  if (DEPARTMENT_ALIASES[upper]) return DEPARTMENT_ALIASES[upper];
+  if (upper === 'PG' || upper.startsWith('PG')) return 'PG';
+  return upper;
+};
+
+const isDepartmentHeader = (deptVal) => {
+  const text = deptVal.trim();
+  if (!text || isNumericOnly(text)) return false;
+
+  const upper = text.toUpperCase();
+  if (KNOWN_DEPARTMENTS.has(upper) || DEPARTMENT_ALIASES[upper]) return true;
+  if (upper === 'PG' || upper.startsWith('PG')) return true;
+
+  return /^[A-Z0-9&\s]{2,20}$/.test(upper) && !looksLikeName(text);
+};
+
+const extractYear = (dateStr) => {
+  if (!dateStr) return '';
+  const text = String(dateStr).trim();
+  const match = text.match(/(\d{4})\s*$/) || text.match(/(\d{2})\s*$/);
+  if (match) {
+    return match[1].length === 2
+      ? (parseInt(match[1], 10) > 50 ? '19' + match[1] : '20' + match[1])
+      : match[1];
+  }
+  return text.length <= 4 && /^\d+$/.test(text) ? text : '';
+};
+
+const parseFacultySheetRows = (rows) => {
+  const sheetData = [];
+  let currentDept = '';
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+
+    const deptVal = row[0] ? row[0].trim() : '';
+    if (deptVal && isDepartmentHeader(deptVal)) {
+      currentDept = normalizeDepartment(deptVal);
+    }
+
+    const facultyName = row[2] ? row[2].trim().replace(/\s+/g, ' ') : '';
+    if (!looksLikeName(facultyName)) continue;
+
+    const dateOfJoining = row[3]?.trim() || '';
+    const designatedDate = row[4]?.trim() || '';
+    const dateOfLeaving = row[5]?.trim() || '';
+
+    let designation = 'Assistant Professor';
+    if (designatedDate && !designatedDate.toLowerCase().includes('na') && designatedDate.trim() !== '') {
+      designation = 'Professor';
+    }
+
+    let leavingYear = '';
+    if (dateOfLeaving && !dateOfLeaving.toLowerCase().includes('na')) {
+      leavingYear = extractYear(dateOfLeaving) || (dateOfLeaving.length < 15 ? dateOfLeaving : '');
+    }
+
+    sheetData.push(normalizeFacultyRecord({
+      Faculty_Name: facultyName,
+      Department: currentDept || 'Unknown',
+      Designation: designation,
+      Joining_Year: extractYear(dateOfJoining),
+      Leaving_Year: leavingYear,
+      Highest_Degree: '',
+    }));
+  }
+
+  return sheetData;
+};
+
+const commitWriteOperations = async (operations) => {
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < operations.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db);
+    operations.slice(i, i + BATCH_SIZE).forEach((operation) => operation(batch));
+    await batch.commit();
+  }
+};
 
 const FacultyDetails = () => {
   const location = useLocation();
@@ -15,7 +147,7 @@ const FacultyDetails = () => {
   const [filterDepartment, setFilterDepartment] = useState('All');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [isSyncing, setIsSyncing] = useState(false);
-  
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const dept = params.get('dept');
@@ -28,7 +160,7 @@ const FacultyDetails = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
-  
+
   const [formData, setFormData] = useState({
     Faculty_Name: '',
     Department: 'CSE',
@@ -62,7 +194,7 @@ const FacultyDetails = () => {
       setFormData({
         Faculty_Name: faculty.Faculty_Name || '',
         Department: faculty.Department || 'CSE',
-        Designation: faculty.Designation || '',
+        Designation: faculty.Designation === 'Professor / Associate Professor' ? 'Professor' : (faculty.Designation || ''),
         Joining_Year: faculty.Joining_Year || '',
         Leaving_Year: faculty.Leaving_Year || '',
         Highest_Degree: faculty.Highest_Degree || ''
@@ -136,7 +268,7 @@ const FacultyDetails = () => {
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws);
-        
+
         let addedCount = 0;
         for (const row of data) {
           if (row.Faculty_Name) {
@@ -176,7 +308,7 @@ const FacultyDetails = () => {
 
     for (let i = 0; i < text.length; i++) {
       const c = text[i];
-      const next = text[i+1];
+      const next = text[i + 1];
       if (c === '"') {
         if (inQuotes && next === '"') {
           row[row.length - 1] += '"';
@@ -203,55 +335,77 @@ const FacultyDetails = () => {
   };
 
   const handleSyncData = async () => {
-    if (!window.confirm("This will perform a full sync. It will refresh all faculty members to match the Google Sheet exactly. Do you want to proceed?")) {
+    if (!window.confirm("Sync faculty data from the Google Sheet? Only new, updated, or removed records will be changed.")) {
       return;
     }
-    
+
     setIsSyncing(true);
     try {
-      const sheetUrl = "https://docs.google.com/spreadsheets/d/1E2VYOBneOPv7hBpnv2X1hCLkdbC67mhurx2tLQq9Ja0/gviz/tq?tqx=out:csv";
+      const sheetUrl = "https://docs.google.com/spreadsheets/d/1E2VYOBneOPv7hBpnv2X1hCLkdbC67mhurx2tLQq9Ja0/export?format=csv&gid=775665137";
       const response = await fetch(sheetUrl);
       if (!response.ok) throw new Error("Failed to fetch Google Sheet data.");
       const csvText = await response.text();
-      
+
       const rows = parseCSV(csvText);
       if (rows.length < 2) {
         alert("The Google Sheet is empty or in an invalid format.");
-        setIsSyncing(false);
         return;
       }
 
-      // Clean headers
-      const headers = rows[0].map(h => h.trim().replace(/^"|"$/g, ''));
-      
-      const sheetData = rows.slice(1).map(row => {
-        const obj = {};
-        headers.forEach((header, index) => {
-          obj[header] = row[index] ? row[index].trim().replace(/^"|"$/g, '') : '';
-        });
-        return obj;
-      }).filter(item => item.Faculty_Name);
+      const sheetData = parseFacultySheetRows(rows);
+      const sheetByKey = new Map();
+      sheetData.forEach((record) => {
+        sheetByKey.set(getFacultySyncKey(record), record);
+      });
 
-      // Delete all existing documents in Firestore 'faculty_members'
-      for (const f of facultyMembers) {
-        await deleteDoc(doc(db, 'faculty_members', f.id));
-      }
+      const existingSnap = await getDocs(collection(db, 'faculty_members'));
+      const existingByKey = new Map();
+      existingSnap.docs.forEach((docSnap) => {
+        const data = { id: docSnap.id, ...docSnap.data() };
+        const key = getFacultySyncKey(data);
+        if (!existingByKey.has(key)) {
+          existingByKey.set(key, data);
+        }
+      });
 
-      // Add the clean records from the Google Sheet
+      const operations = [];
       let addedCount = 0;
-      for (const row of sheetData) {
-        await addDoc(collection(db, 'faculty_members'), {
-          Faculty_Name: (row.Faculty_Name || '').trim(),
-          Department: (row.Department || '').trim(),
-          Designation: (row.Designation || '').trim(),
-          Joining_Year: (row.Joining_Year || '').trim(),
-          Leaving_Year: (row.Leaving_Year || '').trim(),
-          Highest_Degree: (row.Highest_Degree || '').trim()
-        });
-        addedCount++;
+      let updatedCount = 0;
+      let deletedCount = 0;
+      let unchangedCount = 0;
+
+      sheetByKey.forEach((sheetRecord, key) => {
+        const existing = existingByKey.get(key);
+        if (!existing) {
+          const newDocRef = doc(collection(db, 'faculty_members'));
+          operations.push((batch) => batch.set(newDocRef, sheetRecord));
+          addedCount++;
+          return;
+        }
+
+        if (facultyRecordsEqual(existing, sheetRecord)) {
+          unchangedCount++;
+          return;
+        }
+
+        operations.push((batch) => batch.update(doc(db, 'faculty_members', existing.id), sheetRecord));
+        updatedCount++;
+      });
+
+      existingByKey.forEach((existing, key) => {
+        if (!sheetByKey.has(key)) {
+          operations.push((batch) => batch.delete(doc(db, 'faculty_members', existing.id)));
+          deletedCount++;
+        }
+      });
+
+      if (operations.length > 0) {
+        await commitWriteOperations(operations);
       }
 
-      alert(`Sync Complete!\nDatabase has been refreshed to match the Google Sheet exactly.\nTotal Faculty Members: ${addedCount}`);
+      alert(
+        `Sync Complete!\nAdded: ${addedCount}\nUpdated: ${updatedCount}\nRemoved: ${deletedCount}\nUnchanged: ${unchangedCount}`
+      );
     } catch (error) {
       console.error("Error syncing Google Sheet data:", error);
       alert("Error syncing Google Sheet data: " + error.message);
@@ -262,9 +416,9 @@ const FacultyDetails = () => {
 
   const processedFaculty = React.useMemo(() => {
     let sortableItems = [...facultyMembers];
-    
+
     if (searchTerm) {
-      sortableItems = sortableItems.filter(f => 
+      sortableItems = sortableItems.filter(f =>
         (f.Faculty_Name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (f.Department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (f.Designation || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -272,7 +426,7 @@ const FacultyDetails = () => {
     }
 
     if (filterDepartment !== 'All') {
-      sortableItems = sortableItems.filter(f => 
+      sortableItems = sortableItems.filter(f =>
         (f.Department || '').trim().toUpperCase() === filterDepartment.trim().toUpperCase()
       );
     }
@@ -281,7 +435,7 @@ const FacultyDetails = () => {
       sortableItems.sort((a, b) => {
         let aValue = a[sortConfig.key] || '';
         let bValue = b[sortConfig.key] || '';
-        
+
         if (sortConfig.key === 'Joining_Year' || sortConfig.key === 'Leaving_Year') {
           aValue = parseInt(aValue) || 0;
           bValue = parseInt(bValue) || 0;
@@ -296,7 +450,7 @@ const FacultyDetails = () => {
         return 0;
       });
     }
-    
+
     return sortableItems;
   }, [facultyMembers, searchTerm, filterDepartment, sortConfig]);
 
@@ -312,8 +466,8 @@ const FacultyDetails = () => {
     if (sortConfig.key !== columnName) {
       return <ChevronUp size={14} className="text-muted" style={{ opacity: 0.3, marginLeft: '4px' }} />;
     }
-    return sortConfig.direction === 'asc' 
-      ? <ChevronUp size={14} style={{ marginLeft: '4px' }} /> 
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} style={{ marginLeft: '4px' }} />
       : <ChevronDown size={14} style={{ marginLeft: '4px' }} />;
   };
 
@@ -336,18 +490,18 @@ const FacultyDetails = () => {
 
   return (
     <div className="page-view">
-      <Header 
+      <Header
         title={
           <div className="d-flex align-center">
             Faculty Details
-            <span style={{ 
-              fontSize: '0.75rem', 
-              verticalAlign: 'middle', 
-              marginLeft: '0.75rem', 
-              padding: '0.2rem 0.6rem', 
-              borderRadius: '999px', 
-              backgroundColor: 'rgba(37, 99, 235, 0.15)', 
-              color: 'var(--color-primary)', 
+            <span style={{
+              fontSize: '0.75rem',
+              verticalAlign: 'middle',
+              marginLeft: '0.75rem',
+              padding: '0.2rem 0.6rem',
+              borderRadius: '999px',
+              backgroundColor: 'rgba(37, 99, 235, 0.15)',
+              color: 'var(--color-primary)',
               border: '1px solid rgba(37, 99, 235, 0.3)',
               fontWeight: '600'
             }}>
@@ -355,7 +509,7 @@ const FacultyDetails = () => {
             </span>
           </div>
         }
-        subtitle="Manage individual faculty information" 
+        subtitle="Manage individual faculty information"
         actions={
           <div className="d-flex gap-2">
             {selectedIds.length > 0 && (
@@ -363,10 +517,10 @@ const FacultyDetails = () => {
                 <Trash2 size={18} /> Delete Selected ({selectedIds.length})
               </button>
             )}
-            <input 
-              type="file" 
-              accept=".xlsx, .xls, .csv" 
-              style={{ display: 'none' }} 
+            <input
+              type="file"
+              accept=".xlsx, .xls, .csv"
+              style={{ display: 'none' }}
               ref={fileInputRef}
               onChange={handleFileUpload}
             />
@@ -387,9 +541,9 @@ const FacultyDetails = () => {
         <div className="table-toolbar">
           <div className="search-bar">
             <Search size={18} className="search-icon text-muted" />
-            <input 
-              type="text" 
-              placeholder="Search by name, dept, designation..." 
+            <input
+              type="text"
+              placeholder="Search by name, dept, designation..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="search-input"
@@ -397,9 +551,9 @@ const FacultyDetails = () => {
           </div>
           <div className="search-bar" style={{ marginLeft: '1rem', width: 'auto' }}>
             <Filter size={18} className="search-icon text-muted" />
-            <select 
-              className="search-input" 
-              value={filterDepartment} 
+            <select
+              className="search-input"
+              value={filterDepartment}
               onChange={(e) => setFilterDepartment(e.target.value)}
             >
               <option value="All">All Departments</option>
@@ -410,6 +564,7 @@ const FacultyDetails = () => {
               <option value="CSDS">CSDS</option>
               <option value="CSBS">CSBS</option>
               <option value="AIML">AIML</option>
+              <option value="IOT">IoT</option>
               <option value="PG">PG</option>
             </select>
           </div>
@@ -420,10 +575,10 @@ const FacultyDetails = () => {
             <thead>
               <tr>
                 <th style={{ width: '40px' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={selectedIds.length === processedFaculty.length && processedFaculty.length > 0} 
-                    onChange={toggleSelectAll} 
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.length === processedFaculty.length && processedFaculty.length > 0}
+                    onChange={toggleSelectAll}
                   />
                 </th>
                 <th onClick={() => requestSort('Faculty_Name')} style={{ cursor: 'pointer' }} className="user-select-none">
@@ -452,15 +607,15 @@ const FacultyDetails = () => {
                 processedFaculty.map((faculty) => (
                   <tr key={faculty.id} className={selectedIds.includes(faculty.id) ? 'selected-row' : ''}>
                     <td>
-                      <input 
-                        type="checkbox" 
-                        checked={selectedIds.includes(faculty.id)} 
-                        onChange={() => toggleSelect(faculty.id)} 
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(faculty.id)}
+                        onChange={() => toggleSelect(faculty.id)}
                       />
                     </td>
                     <td className="font-semibold">{faculty.Faculty_Name}</td>
                     <td><span className={`badge-dept badge-${(faculty.Department || 'cse').toLowerCase()}`}>{faculty.Department || 'N/A'}</span></td>
-                    <td>{faculty.Designation || '-'}</td>
+                    <td>{faculty.Designation === 'Professor / Associate Professor' ? 'Professor' : (faculty.Designation || '-')}</td>
                     <td>{faculty.Joining_Year || '-'}</td>
                     <td>{faculty.Leaving_Year || '-'}</td>
                     <td>{faculty.Highest_Degree || '-'}</td>
@@ -503,6 +658,7 @@ const FacultyDetails = () => {
                     <option value="CSDS">CSDS</option>
                     <option value="CSBS">CSBS</option>
                     <option value="AIML">AIML</option>
+                    <option value="IOT">IoT</option>
                     <option value="PG">PG</option>
                   </select>
                 </div>
@@ -527,7 +683,7 @@ const FacultyDetails = () => {
                   <input type="number" name="Leaving_Year" className="input-field" value={formData.Leaving_Year} onChange={handleInputChange} placeholder="Leave empty if current" />
                 </div>
               </div>
-              
+
               <div className="modal-footer d-flex justify-between" style={{ marginTop: '1.5rem' }}>
                 <button type="button" className="btn btn-secondary" onClick={closeModal}>Cancel</button>
                 <button type="submit" className="btn btn-primary">{isEditing ? 'Update' : 'Save'} Faculty</button>
