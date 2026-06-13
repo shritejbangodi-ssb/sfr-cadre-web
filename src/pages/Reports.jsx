@@ -46,7 +46,7 @@ const Reports = () => {
           cadreDetails: d.cadreDetails,
           yearlyData: d.yearlyData
         }));
-        
+
       setDeptData(processedDepts);
 
     } catch (err) {
@@ -157,9 +157,9 @@ const Reports = () => {
 
   return (
     <div className="page-view">
-      <Header 
-        title="Reports Generator" 
-        subtitle="Export live academic analytics into formatted documents" 
+      <Header
+        title="Reports Generator"
+        subtitle="Export live academic analytics into formatted documents"
       />
 
       <div className="stats-grid">
@@ -184,7 +184,7 @@ const Reports = () => {
         </div>
       </div>
 
-      <div className="table-container glass-panel" style={{ marginTop: '2rem' }}>
+      {/* <div className="table-container glass-panel" style={{ marginTop: '2rem' }}>
         <h3 style={{ padding: '1rem 1rem 0 1rem' }}>Live Report Preview</h3>
         <div className="table-responsive">
           <table className="data-table">
@@ -216,7 +216,7 @@ const Reports = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </div> */}
 
       {targetYears.map((yearStr, yearIdx) => {
         const label = yearIdx === 0 ? 'CAY' : yearIdx === 1 ? 'CAYM1' : `CAYM${yearIdx}`;

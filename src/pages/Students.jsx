@@ -27,8 +27,45 @@ const Students = () => {
   const [editingCell, setEditingCell] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Fetch from Firebase
+  // New Google Sheet Data State
+  const [sheetData, setSheetData] = useState([]);
+  const [sheetHeaders, setSheetHeaders] = useState([]);
+  const [sheetTotal, setSheetTotal] = useState([]);
+
+  // Fetch from Firebase and Google Sheet
   useEffect(() => {
+    const fetchSheetData = async () => {
+      try {
+        const url = "https://docs.google.com/spreadsheets/d/1wAo9LA1LIc_SSwSMhNrB2DYWjBtoanmKqFhTbqPehPA/export?format=csv&gid=1323997071";
+        const response = await fetch(url);
+        const text = await response.text();
+        const lines = text.trim().split('\n').map(line => line.split(','));
+        
+        if (lines.length > 1) {
+          setSheetHeaders(lines[0]);
+          
+          const dataRows = [];
+          for (let i = 1; i < lines.length; i++) {
+             if (lines[i][0] && lines[i][0].toLowerCase().includes('total students')) {
+               setSheetTotal(lines[i]);
+               break; 
+             }
+             if (lines[i][0] && (lines[i][0].startsWith('DS=') || lines[i][0].startsWith('AS='))) {
+                continue;
+             }
+             if (lines[i][0] && lines[i][0].trim() !== '') {
+               dataRows.push(lines[i]);
+             }
+          }
+          setSheetData(dataRows);
+        }
+      } catch (err) {
+        console.error("Error fetching Google Sheet:", err);
+      }
+    };
+
+    fetchSheetData();
+
     const unsubscribe = onSnapshot(collection(db, 'students'), (snapshot) => {
       const studentData = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -220,7 +257,12 @@ const Students = () => {
 
         let updates = { [field]: processedValue };
 
-        if (field === 'noOfLateralEntry') {
+        if (field === 'studentCount') {
+           updates = {
+             noOfStudents: (parseInt(processedValue, 10) || 0).toString(),
+             noOfLateralEntry: '0'
+           };
+        } else if (field === 'noOfLateralEntry') {
            const baseStudents = parseInt(record.noOfStudents, 10) || 0;
            let lateralEntry = parseInt(processedValue, 10) || 0;
            const maxLateral = Math.floor(baseStudents * 0.10);
@@ -244,7 +286,7 @@ const Students = () => {
       } else if (type === 'newData') {
         const { dept, acYear, studyYear, field } = currentEditing;
         if (processedValue !== '') {
-          let noOfStudentsStr = field === 'noOfStudents' ? processedValue : '0';
+          let noOfStudentsStr = (field === 'noOfStudents' || field === 'studentCount') ? processedValue : '0';
           let noOfLateralEntryStr = field === 'noOfLateralEntry' ? processedValue : '0';
           
           const baseStudents = parseInt(noOfStudentsStr, 10) || 0;
@@ -410,6 +452,57 @@ const Students = () => {
         }
       />
 
+      <div className="table-container glass-panel" style={{ marginBottom: '2rem' }}>
+        <h3 style={{ padding: '1rem 1rem 0 1rem', color: 'var(--text-main)' }}>Student Counts (From Google Sheet)</h3>
+        <div className="table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {sheetHeaders.map((header, idx) => (
+                  <th key={idx}>{header || 'Department'}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sheetData.length > 0 ? (
+                <>
+                  {sheetData.map((row, rowIdx) => (
+                    <tr key={rowIdx}>
+                      {row.map((cell, cellIdx) => {
+                        let displayCell = cell;
+                        if (cellIdx === 0 && cell) {
+                          const deptParts = cell.split('-');
+                          const rawDeptName = deptParts.length > 1 ? deptParts[1] : cell;
+                          displayCell = <span className={`badge-dept badge-${rawDeptName.toLowerCase()}`}>{cell}</span>;
+                        }
+                        return (
+                          <td key={cellIdx} className={cellIdx > 0 ? "font-semibold" : ""}>
+                            {displayCell}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                  {sheetTotal && sheetTotal.length > 0 && (
+                    <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', fontWeight: 'bold' }}>
+                      {sheetTotal.map((cell, cellIdx) => (
+                        <td key={cellIdx} className="font-semibold" style={{ color: cellIdx > 0 ? 'var(--color-primary)' : 'inherit' }}>
+                          {cellIdx === 0 ? 'Total' : cell}
+                        </td>
+                      ))}
+                    </tr>
+                  )}
+                </>
+              ) : (
+                <tr>
+                  <td colSpan={sheetHeaders.length || 6} className="empty-state">Loading sheet data...</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="table-container glass-panel">
         <div className="table-toolbar" style={{ marginBottom: '1.5rem' }}>
           <div className="search-bar">
@@ -437,13 +530,18 @@ const Students = () => {
                   <thead>
                     <tr>
                       <th rowSpan="2" style={{ border: '1px solid var(--border-color)', textAlign: 'center', verticalAlign: 'middle', backgroundColor: 'rgba(255,255,255,0.02)' }}>Year of Study</th>
+                      <th colSpan={allAcademicYears.length} style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px', fontSize: '1rem', textTransform: 'uppercase' }}>
+                        STUDENTS COUNT ACADEMIC YEAR
+                      </th>
+                    </tr>
+                    <tr>
                       {allAcademicYears.map((rawYear, idx) => {
                          const cleanY = rawYear ? rawYear.replace(/^CAYm?\d?\s*\/?\s*\(?/gi, '').replace(/\)$/, '').trim() : '';
                          const label = idx === 0 ? 'CAY' : (idx === 1 ? 'CAYm1' : `CAYm${idx}`);
                          return (
-                            <th key={rawYear} colSpan="2" style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: 0 }}>
+                            <th key={rawYear} style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: 0 }}>
                               {renderEditableCell(`header-${dept}-${rawYear}`, 'header', { dept, oldYear: rawYear }, cleanY, (
-                                <div style={{ fontWeight: 'bold', lineHeight: '1.4', padding: '4px 0' }}>
+                                <div style={{ fontWeight: 'bold', lineHeight: '1.4', padding: '8px 0' }}>
                                   <div style={{ color: 'var(--text-main)', marginBottom: '2px', fontSize: '0.85rem' }}>{label}</div>
                                   <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 'normal' }}>({cleanY})</div>
                                 </div>
@@ -452,38 +550,21 @@ const Students = () => {
                          )
                       })}
                     </tr>
-                    <tr>
-                      {allAcademicYears.map(year => (
-                        <React.Fragment key={year + '-sub'}>
-                          <th style={{ border: '1px solid var(--border-color)', textAlign: 'center', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.01)' }}>Sanction<br/>Intake</th>
-                          <th style={{ border: '1px solid var(--border-color)', textAlign: 'center', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.01)' }}>Actual admitted through<br/>lateral entry students</th>
-                        </React.Fragment>
-                      ))}
-                    </tr>
                   </thead>
                   <tbody>
-                    {['2nd', '3rd', '4th'].map(studyYear => (
+                     {(dept === 'PG' ? ['1st', '2nd'] : ['2nd', '3rd', '4th']).map(studyYear => (
                        <tr key={studyYear}>
                          <td style={{ border: '1px solid var(--border-color)', fontWeight: 'bold', textAlign: 'center' }}>{studyYear} Year</td>
                          {allAcademicYears.map(year => {
                            const data = getStudentData(dept, year, studyYear);
                            return (
-                             <React.Fragment key={year + studyYear}>
-                               <td style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '0' }}>
-                                 {data ? (
-                                   renderEditableCell(`data-${data.id}-noOfStudents`, 'data', { recordId: data.id, field: 'noOfStudents' }, data.noOfStudents, data.noOfStudents)
-                                 ) : (
-                                   renderEditableCell(`newdata-${dept}-${year}-${studyYear}-noOfStudents`, 'newData', { dept, acYear: year, studyYear, field: 'noOfStudents' }, '', '-')
-                                 )}
-                               </td>
-                               <td style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '0' }}>
-                                 {data ? (
-                                   renderEditableCell(`data-${data.id}-noOfLateralEntry`, 'data', { recordId: data.id, field: 'noOfLateralEntry' }, data.noOfLateralEntry, data.noOfLateralEntry)
-                                 ) : (
-                                   renderEditableCell(`newdata-${dept}-${year}-${studyYear}-noOfLateralEntry`, 'newData', { dept, acYear: year, studyYear, field: 'noOfLateralEntry' }, '', '-')
-                                 )}
-                               </td>
-                             </React.Fragment>
+                             <td key={year + studyYear} style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '0' }}>
+                               {data ? (
+                                 renderEditableCell(`data-${data.id}-studentCount`, 'data', { recordId: data.id, field: 'studentCount' }, data.noOfStudents + data.noOfLateralEntry, data.noOfStudents + data.noOfLateralEntry)
+                               ) : (
+                                 renderEditableCell(`newdata-${dept}-${year}-${studyYear}-studentCount`, 'newData', { dept, acYear: year, studyYear, field: 'studentCount' }, '', '-')
+                               )}
+                             </td>
                            );
                          })}
                        </tr>
@@ -491,23 +572,24 @@ const Students = () => {
                     <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', fontWeight: 'bold' }}>
                       <td style={{ border: '1px solid var(--border-color)', textAlign: 'center' }}>Sub-Total</td>
                       {allAcademicYears.map(year => {
-                        const totalS = ['2nd', '3rd', '4th'].reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfStudents || 0), 0);
-                        const totalL = ['2nd', '3rd', '4th'].reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfLateralEntry || 0), 0);
+                        const yearsArray = dept === 'PG' ? ['1st', '2nd'] : ['2nd', '3rd', '4th'];
+                        const totalS = yearsArray.reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfStudents || 0), 0);
+                        const totalL = yearsArray.reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfLateralEntry || 0), 0);
                         return (
-                          <React.Fragment key={year + 'subtotal'}>
-                            <td style={{ border: '1px solid var(--border-color)', textAlign: 'center' }}>{totalS || '-'}</td>
-                            <td style={{ border: '1px solid var(--border-color)', textAlign: 'center' }}>{totalL || '-'}</td>
-                          </React.Fragment>
+                          <td key={year + 'subtotal'} style={{ border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                            {(totalS + totalL) || '-'}
+                          </td>
                         );
                       })}
                     </tr>
                     <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', fontWeight: 'bold' }}>
                       <td style={{ border: '1px solid var(--border-color)', textAlign: 'center' }}>Total</td>
                       {allAcademicYears.map(year => {
-                        const totalS = ['2nd', '3rd', '4th'].reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfStudents || 0), 0);
-                        const totalL = ['2nd', '3rd', '4th'].reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfLateralEntry || 0), 0);
+                        const yearsArray = dept === 'PG' ? ['1st', '2nd'] : ['2nd', '3rd', '4th'];
+                        const totalS = yearsArray.reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfStudents || 0), 0);
+                        const totalL = yearsArray.reduce((sum, y) => sum + (getStudentData(dept, year, y)?.noOfLateralEntry || 0), 0);
                         return (
-                          <td colSpan="2" key={year + 'total'} style={{ border: '1px solid var(--border-color)', textAlign: 'center', color: 'var(--color-primary)' }}>
+                          <td key={year + 'total'} style={{ border: '1px solid var(--border-color)', textAlign: 'center', color: 'var(--color-primary)' }}>
                             {(totalS + totalL) || '-'}
                           </td>
                         );
@@ -562,7 +644,7 @@ const Students = () => {
                 <div className="input-group" style={{ flex: 1 }}>
                   <label className="input-label">Year</label>
                   <select name="year" className="input-field" value={formData.year} onChange={handleInputChange}>
-                    {['2nd', '3rd', '4th'].map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                    {['1st', '2nd', '3rd', '4th'].map(yr => <option key={yr} value={yr}>{yr}</option>)}
                   </select>
                 </div>
                 <div className="input-group" style={{ flex: 1 }}>

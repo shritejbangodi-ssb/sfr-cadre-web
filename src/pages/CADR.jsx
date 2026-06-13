@@ -34,8 +34,7 @@ const CADR = () => {
           const dept = f.Department ? f.Department.toUpperCase() : 'UNKNOWN';
           if (!depts[dept]) depts[dept] = { department: dept, students: 0, profs: 0, assocProfs: 0, asstProfs: 0 };
 
-          const rawDesignation = (f.Designation || '').toLowerCase();
-          const designation = rawDesignation === 'professor / associate professor' ? 'professor' : rawDesignation;
+          const designation = (f.Designation || '').toLowerCase();
           const isAsst = designation.includes('assistant') || designation.includes('asst');
           const isAssoc = designation.includes('associate') || designation.includes('assoc');
           const temp = designation

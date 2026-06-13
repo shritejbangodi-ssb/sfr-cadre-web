@@ -109,7 +109,7 @@ const parseFacultySheetRows = (rows) => {
 
     let designation = 'Assistant Professor';
     if (designatedDate && !designatedDate.toLowerCase().includes('na') && designatedDate.trim() !== '') {
-      designation = 'Professor';
+      designation = 'Professor / Associate Professor';
     }
 
     let leavingYear = '';
@@ -194,7 +194,7 @@ const FacultyDetails = () => {
       setFormData({
         Faculty_Name: faculty.Faculty_Name || '',
         Department: faculty.Department || 'CSE',
-        Designation: faculty.Designation === 'Professor / Associate Professor' ? 'Professor' : (faculty.Designation || ''),
+        Designation: faculty.Designation || '',
         Joining_Year: faculty.Joining_Year || '',
         Leaving_Year: faculty.Leaving_Year || '',
         Highest_Degree: faculty.Highest_Degree || ''
@@ -341,7 +341,7 @@ const FacultyDetails = () => {
 
     setIsSyncing(true);
     try {
-      const sheetUrl = "https://docs.google.com/spreadsheets/d/1E2VYOBneOPv7hBpnv2X1hCLkdbC67mhurx2tLQq9Ja0/export?format=csv&gid=775665137";
+      const sheetUrl = "https://docs.google.com/spreadsheets/d/1E2VYOBneOPv7hBpnv2X1hCLkdbC67mhurx2tLQq9Ja0/export?format=csv&gid=7131963";
       const response = await fetch(sheetUrl);
       if (!response.ok) throw new Error("Failed to fetch Google Sheet data.");
       const csvText = await response.text();
@@ -615,7 +615,7 @@ const FacultyDetails = () => {
                     </td>
                     <td className="font-semibold">{faculty.Faculty_Name}</td>
                     <td><span className={`badge-dept badge-${(faculty.Department || 'cse').toLowerCase()}`}>{faculty.Department || 'N/A'}</span></td>
-                    <td>{faculty.Designation === 'Professor / Associate Professor' ? 'Professor' : (faculty.Designation || '-')}</td>
+                    <td>{faculty.Designation || '-'}</td>
                     <td>{faculty.Joining_Year || '-'}</td>
                     <td>{faculty.Leaving_Year || '-'}</td>
                     <td>{faculty.Highest_Degree || '-'}</td>

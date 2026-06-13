@@ -1,16 +1,15 @@
 import React from 'react';
 import Header from '../components/Header';
-import './Students.css'; // Reuse existing styles
 
 const FacultyQualification = () => {
   return (
     <div className="page-view">
-      <Header 
-        title="Faculty Qualification" 
-        subtitle="Track and manage faculty qualifications and degrees" 
+      <Header
+        title="Faculty Qualification"
+        subtitle="Manage and view faculty qualifications"
       />
-      <div className="table-container glass-panel p-6" style={{ padding: '2rem' }}>
-        <p className="text-muted">Faculty Qualification content will go here.</p>
+      <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', marginTop: '1.5rem' }}>
+        <p className="text-muted">Faculty Qualification tracking coming soon...</p>
       </div>
     </div>
   );

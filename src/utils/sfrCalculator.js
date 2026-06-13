@@ -93,15 +93,16 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = n
   // Initialize departments
   studentDocs.forEach(s => {
     const dept = s.department ? s.department.toUpperCase() : 'UNKNOWN';
+    if (dept.includes('STUDENTS COUNT')) return;
     if (!depts[dept]) depts[dept] = { department: dept, yearlyData: {}, profs: 0, assocProfs: 0, asstProfs: 0 };
   });
   facultyDocs.forEach(f => {
     const dept = f.Department ? f.Department.toUpperCase() : 'UNKNOWN';
+    if (dept.includes('STUDENTS COUNT')) return;
     if (!depts[dept]) depts[dept] = { department: dept, yearlyData: {}, profs: 0, assocProfs: 0, asstProfs: 0 };
     
     // Count roles for cadre marks (using their current designation)
-    const rawDesignation = (f.Designation || '').toLowerCase();
-    const designation = rawDesignation === 'professor / associate professor' ? 'professor' : rawDesignation;
+    const designation = (f.Designation || '').toLowerCase();
     const isAsst = designation.includes('assistant') || designation.includes('asst');
     const isAssoc = designation.includes('associate') || designation.includes('assoc');
     const temp = designation
@@ -195,3 +196,38 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = n
   
   return depts;
 };
+
+export const buildFacultyQualifications = (facultyDocs, targetYears) => {
+  return targetYears.map((yearStr, idx) => {
+    const activeFaculty = facultyDocs.filter(f => {
+      const startYear = getYearNumber(yearStr);
+      if (startYear === 0) return false;
+      const joinYear = parseInt(f.Joining_Year);
+      const leaveYear = parseInt(f.Leaving_Year);
+      if (isNaN(joinYear)) return false;
+      if (joinYear > startYear) return false;
+      if (!isNaN(leaveYear) && leaveYear < startYear) return false;
+      return true;
+    });
+
+    let phdCount = 0;
+    let mtechCount = 0;
+    
+    activeFaculty.forEach(f => {
+      const degree = (f.Highest_Degree || '').toLowerCase();
+      if (degree.includes('phd') || degree.includes('ph.d') || degree.includes('doctorate')) {
+        phdCount++;
+      } else if (degree.includes('mtech') || degree.includes('m.tech') || degree.includes('me') || degree.includes('m.e') || degree.includes('master')) {
+        mtechCount++;
+      }
+    });
+
+    return {
+      label: idx === 0 ? 'CAY' : idx === 1 ? 'CAYM1' : `CAYM${idx}`,
+      academicYear: formatAcademicYearShort(yearStr),
+      phd: phdCount,
+      mtech: mtechCount,
+    };
+  });
+};
+

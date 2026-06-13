@@ -80,8 +80,7 @@ const DepartmentAnalysis = () => {
             return {
               department: d.department,
               totalProfs: d.maxFacultySeen,
-              sfrRatio: sfr,
-              cadrRatio: cadr
+              sfrRatio: sfr
             };
           });
           
@@ -113,7 +112,6 @@ const DepartmentAnalysis = () => {
                 <th>Department</th>
                 <th>Total No of Prof</th>
                 <th>SFR Ratio</th>
-                <th>CADR Ratio</th>
               </tr>
             </thead>
             <tbody>
@@ -128,9 +126,6 @@ const DepartmentAnalysis = () => {
                     <td className="font-semibold">{dept.totalProfs}</td>
                     <td className="font-semibold">
                       {dept.sfrRatio}
-                    </td>
-                    <td className="font-semibold" style={{ color: dept.cadrRatio === 'Satisfied' ? 'var(--color-success)' : (dept.cadrRatio === 'Not Satisfied' ? 'var(--color-danger)' : (dept.cadrRatio !== 'N/A' ? 'var(--color-success)' : 'inherit')) }}>
-                      {dept.cadrRatio}
                     </td>
                   </tr>
                 ))
