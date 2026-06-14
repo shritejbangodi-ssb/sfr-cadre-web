@@ -5,7 +5,7 @@ import { db } from '../services/firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { calculateNBA_SFR, getYearNumber } from '../utils/sfrCalculator';
+import { calculateNBA_SFR, getYearNumber, formatAcademicYear, getAcademicYearsInRange } from '../utils/sfrCalculator';
 import Header from '../components/Header';
 
 const Reports = () => {
@@ -14,27 +14,116 @@ const Reports = () => {
   const [deptData, setDeptData] = useState([]); // Array of { department, students, faculty, sfr, cadreMarks, cadreDetails }
   const [targetYears, setTargetYears] = useState([]);
 
+  const defaultStartYear = 2023;
+  const defaultEndStart = 2025;
+  const startYear = localStorage.getItem('globalStartYear') || formatAcademicYear(defaultStartYear, true);
+  const endYear = localStorage.getItem('globalEndYear') || formatAcademicYear(defaultEndStart, true);
+
   useEffect(() => {
     fetchReportData();
   }, []);
 
   const fetchReportData = async () => {
     try {
+      const fetchSheetTotals = async () => {
+        try {
+          const url = "https://docs.google.com/spreadsheets/d/1E2VYOBneOPv7hBpnv2X1hCLkdbC67mhurx2tLQq9Ja0/export?format=csv&gid=7131963";
+          const response = await fetch(url);
+          const text = await response.text();
+          const lines = text.trim().split('\n').map(line => line.split(','));
+          if (lines.length > 2) {
+            const headerRow = lines.find(line => line.includes('Department'));
+            const byDept = {};
+
+            if (headerRow) {
+              lines.forEach(row => {
+                 const deptName = row[1] ? row[1].toUpperCase().trim() : '';
+                 if (deptName && deptName !== 'DEPARTMENT' && !deptName.includes('ALL DEPARTMENT')) {
+                    byDept[deptName] = {};
+                    headerRow.forEach((h, idx) => {
+                       const yearStr = (h || '').trim();
+                       if (yearStr && yearStr.match(/\d{4}-\d{2}/)) {
+                         byDept[deptName][yearStr] = parseInt(row[idx], 10) || 0;
+                       }
+                    });
+                 }
+              });
+            }
+            return byDept;
+          }
+        } catch (err) {
+          console.error("Error fetching Google Sheet for Reports:", err);
+        }
+        return null;
+      };
+
+      const fetchStudentSheetTotals = async () => {
+        try {
+          const url = "https://docs.google.com/spreadsheets/d/1wAo9LA1LIc_SSwSMhNrB2DYWjBtoanmKqFhTbqPehPA/export?format=csv&gid=1323997071";
+          const response = await fetch(url);
+          const text = await response.text();
+          const lines = text.trim().split('\n').map(line => line.split(','));
+          
+          if (lines.length > 1) {
+            const headerRow = lines[0];
+            const byDept = {};
+
+            if (headerRow) {
+              lines.forEach(row => {
+                 const rawDept = row[0] ? row[0].toUpperCase().trim() : '';
+                 if (rawDept && !rawDept.includes('TOTAL') && !rawDept.includes('YEAR') && !rawDept.startsWith('DS=') && !rawDept.startsWith('AS=') && !rawDept.startsWith('S=')) {
+                    let deptName = rawDept;
+                    if (deptName.includes('-')) {
+                        deptName = deptName.split('-')[1].trim();
+                    }
+                    
+                    if (deptName === 'CYBERSECURITY') deptName = 'CSCY';
+                    if (deptName === 'CS&DESIGN' || deptName === 'CS & DESIGN') deptName = 'CSD';
+
+                    if (!byDept[deptName]) byDept[deptName] = {};
+                    headerRow.forEach((h, idx) => {
+                       const match = (h || '').match(/(\d{4}-\d{2})/);
+                       if (match) {
+                         const yearKey = match[1];
+                         const val = parseInt(row[idx], 10) || 0;
+                         byDept[deptName][yearKey] = (byDept[deptName][yearKey] || 0) + val;
+                       }
+                    });
+                 }
+              });
+            }
+            return byDept;
+          }
+        } catch (err) {
+          console.error("Error fetching Student Google Sheet for Reports:", err);
+        }
+        return null;
+      };
+
       const studentSnap = await getDocs(collection(db, 'students'));
       const studentList = studentSnap.docs.map(d => d.data());
 
       const facultySnap = await getDocs(collection(db, 'faculty_members'));
       const facultyList = facultySnap.docs.map(d => d.data());
 
-      const calculatedDepts = calculateNBA_SFR(studentList, facultyList);
+      const sheetFacultyCounts = await fetchSheetTotals();
+      const sheetStudentCounts = await fetchStudentSheetTotals();
 
-      // Get the target academic years dynamically
-      const allYears = [...new Set(studentList.map(s => s.academicYear).filter(Boolean))];
-      allYears.sort((a, b) => getYearNumber(b) - getYearNumber(a));
-      const computedTargetYears = allYears.slice(0, 3);
+      const years = getAcademicYearsInRange(startYear, endYear);
+      const calculatedDepts = calculateNBA_SFR(studentList, facultyList, years, sheetFacultyCounts, sheetStudentCounts);
+
+      let processedDepts = Object.values(calculatedDepts).filter(d => d.department !== 'UNKNOWN');
+
+      // Filter out legacy unmapped names
+      processedDepts = processedDepts.filter(d => 
+        d.department !== 'CS & DESIGN' && 
+        d.department !== 'CYBERSECURITY'
+      );
+
+      const computedTargetYears = processedDepts.length > 0 ? processedDepts[0].targetYears : [];
       setTargetYears(computedTargetYears);
 
-      const processedDepts = Object.values(calculatedDepts)
+      const finalDepts = processedDepts
         .sort((a, b) => a.department.localeCompare(b.department))
         .map(d => ({
           department: d.department,
@@ -47,7 +136,7 @@ const Reports = () => {
           yearlyData: d.yearlyData
         }));
 
-      setDeptData(processedDepts);
+      setDeptData(finalDepts);
 
     } catch (err) {
       console.error("Error fetching report data", err);

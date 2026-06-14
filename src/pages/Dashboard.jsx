@@ -28,8 +28,8 @@ const defaultStartYear = 2023;
 const defaultEndStart = 2025;
 
 const Dashboard = () => {
-  const [startYear, setStartYear] = useState(formatAcademicYear(defaultStartYear, true));
-  const [endYear, setEndYear] = useState(formatAcademicYear(defaultEndStart, true));
+  const [startYear, setStartYear] = useState(() => localStorage.getItem('globalStartYear') || formatAcademicYear(defaultStartYear, true));
+  const [endYear, setEndYear] = useState(() => localStorage.getItem('globalEndYear') || formatAcademicYear(defaultEndStart, true));
 
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -45,11 +45,20 @@ const Dashboard = () => {
   const handleStartYearChange = (e) => {
     const value = e.target.value;
     setStartYear(value);
+    localStorage.setItem('globalStartYear', value);
 
     const start = parseInt(value.match(/\d{4}/)?.[0] || '0', 10);
     if (start) {
-      setEndYear(formatAcademicYear(start + 2, true));
+      const newEnd = formatAcademicYear(start + 2, true);
+      setEndYear(newEnd);
+      localStorage.setItem('globalEndYear', newEnd);
     }
+  };
+
+  const handleEndYearChange = (e) => {
+    const value = e.target.value;
+    setEndYear(value);
+    localStorage.setItem('globalEndYear', value);
   };
 
   useEffect(() => {
@@ -61,22 +70,42 @@ const Dashboard = () => {
         const response = await fetch(url);
         const text = await response.text();
         const lines = text.trim().split('\n').map(line => line.split(','));
-        if (lines.length > 1) {
-          const headers = lines[0];
-          const totalRow = lines[lines.length - 1];
+        if (lines.length > 2) {
+          const headerRow = lines.find(line => line.includes('Department'));
+          const totalRow = lines.find(line => line.some(cell => (cell || '').toLowerCase().includes('all department')));
+          
           const totalsByYear = {};
-          headers.forEach((h, idx) => {
-            const yearStr = (h || '').trim();
-            if (yearStr && yearStr.match(/\d{4}-\d{2}/)) {
-              totalsByYear[yearStr] = parseInt(totalRow[idx], 10) || 0;
+          const byDept = {};
+
+          if (headerRow) {
+            if (totalRow) {
+              headerRow.forEach((h, idx) => {
+                const yearStr = (h || '').trim();
+                if (yearStr && yearStr.match(/\d{4}-\d{2}/)) {
+                  totalsByYear[yearStr] = parseInt(totalRow[idx], 10) || 0;
+                }
+              });
             }
-          });
-          return totalsByYear;
+
+            lines.forEach(row => {
+               const deptName = row[1] ? row[1].toUpperCase().trim() : '';
+               if (deptName && deptName !== 'DEPARTMENT' && !deptName.includes('ALL DEPARTMENT')) {
+                  byDept[deptName] = {};
+                  headerRow.forEach((h, idx) => {
+                     const yearStr = (h || '').trim();
+                     if (yearStr && yearStr.match(/\d{4}-\d{2}/)) {
+                       byDept[deptName][yearStr] = parseInt(row[idx], 10) || 0;
+                     }
+                  });
+               }
+            });
+          }
+          return { totalsByYear, byDept };
         }
       } catch (err) {
         console.error("Error fetching Google Sheet for Dashboard:", err);
       }
-      return null;
+      return { totalsByYear: null, byDept: null };
     };
 
     const fetchStudentSheetTotals = async () => {
@@ -84,46 +113,83 @@ const Dashboard = () => {
         const url = "https://docs.google.com/spreadsheets/d/1wAo9LA1LIc_SSwSMhNrB2DYWjBtoanmKqFhTbqPehPA/export?format=csv&gid=1323997071";
         const response = await fetch(url);
         const text = await response.text();
-        // Handle csv parsing properly for quoted fields if any, but since the target row is simple we can just split by comma normally,
-        // though row 47 is 'S=Total no. of students...' and it has commas?
-        // Let's use a simple CSV parse or just a custom split because text inside quotes might have commas.
-        // Wait, the row is 'S=Total no. of students in the Department (DS) and allied departments (AS),2676,2543,2213,1817,1422'
-        // There are no commas in that first cell. So split(',') is safe.
-        const lines = text.trim().split('\n');
+        const lines = text.trim().split('\n').map(line => line.split(','));
+        
         if (lines.length > 1) {
-          const headers = lines[0].split(',');
-          const sRowLine = lines.find(line => line.startsWith('S=Total no. of students'));
-          if (sRowLine) {
-            const sRow = sRowLine.split(',');
-            const totalsByYear = {};
-            headers.forEach((h, idx) => {
-              const match = (h || '').match(/(\d{4}-\d{2})/);
-              if (match) {
-                totalsByYear[match[1]] = parseInt(sRow[idx], 10) || 0;
-              }
+          const headerRow = lines[0];
+          const totalRow = lines.find(line => {
+             const val = (line[0] || '').toLowerCase();
+             return val.includes('total students') || val.startsWith('s=');
+          });
+          
+          const totalsByYear = {};
+          const byDept = {};
+
+          if (headerRow) {
+            if (totalRow) {
+              headerRow.forEach((h, idx) => {
+                const match = (h || '').match(/(\d{4}-\d{2})/);
+                if (match) {
+                  totalsByYear[match[1]] = parseInt(totalRow[idx], 10) || 0;
+                }
+              });
+            }
+
+            lines.forEach(row => {
+               const rawDept = row[0] ? row[0].toUpperCase().trim() : '';
+               if (rawDept && !rawDept.includes('TOTAL') && !rawDept.includes('YEAR') && !rawDept.startsWith('DS=') && !rawDept.startsWith('AS=') && !rawDept.startsWith('S=')) {
+                  let deptName = rawDept;
+                  if (deptName.includes('-')) {
+                      deptName = deptName.split('-')[1].trim();
+                  }
+                  
+                  if (deptName === 'CYBERSECURITY') deptName = 'CSCY';
+                  if (deptName === 'CS&DESIGN' || deptName === 'CS & DESIGN') deptName = 'CSD';
+
+                  if (!byDept[deptName]) byDept[deptName] = {};
+                  headerRow.forEach((h, idx) => {
+                     const match = (h || '').match(/(\d{4}-\d{2})/);
+                     if (match) {
+                       const yearKey = match[1];
+                       const val = parseInt(row[idx], 10) || 0;
+                       byDept[deptName][yearKey] = (byDept[deptName][yearKey] || 0) + val;
+                     }
+                  });
+               }
             });
-            return totalsByYear;
           }
+          return { totalsByYear, byDept };
         }
       } catch (err) {
         console.error("Error fetching Student Google Sheet for Dashboard:", err);
       }
-      return null;
+      return { totalsByYear: null, byDept: null };
     };
 
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
       const studentDocs = snap.docs.map(doc => doc.data());
 
       const fetchFacultyAndBuildStats = async () => {
-        const sheetTotals = await fetchSheetTotals();
-        const studentTotals = await fetchStudentSheetTotals();
+        const sheetData = await fetchSheetTotals();
+        const sheetTotals = sheetData?.totalsByYear;
+        const sheetFacultyCounts = sheetData?.byDept;
+        
+        const studentSheetData = await fetchStudentSheetTotals();
+        const studentTotals = studentSheetData?.totalsByYear;
+        const sheetStudentCounts = studentSheetData?.byDept;
 
         unsubFaculty = onSnapshot(collection(db, 'faculty_members'), (facSnap) => {
           const facultyDocs = facSnap.docs.map(f => f.data());
           const years = getAcademicYearsInRange(startYear, endYear);
 
-          const calculatedDepts = calculateNBA_SFR(studentDocs, facultyDocs, years);
-          const deptArray = Object.values(calculatedDepts).filter(d => d.department !== 'UNKNOWN');
+          const calculatedDepts = calculateNBA_SFR(studentDocs, facultyDocs, years, sheetFacultyCounts, sheetStudentCounts);
+          let deptArray = Object.values(calculatedDepts).filter(d => d.department !== 'UNKNOWN');
+
+          // Filter out legacy unmapped department names to prevent duplicate 0-value bars
+          deptArray = deptArray.filter(d => 
+            d.department !== 'CS & DESIGN' && 
+            d.department !== 'CYBERSECURITY'
+          );
 
           let totalStudents = 0;
           let sumAverages = 0;
@@ -262,7 +328,7 @@ const Dashboard = () => {
             type="text"
             className="year-range-input"
             value={endYear}
-            onChange={(e) => setEndYear(e.target.value)}
+            onChange={handleEndYearChange}
             placeholder="2025-26"
           />
         </label>

@@ -77,7 +77,7 @@ export const buildCAYDetails = (studentDocs, facultyDocs, targetYears) => {
   }));
 };
 
-export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = null) => {
+export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = null, sheetFacultyCounts = null, sheetStudentCounts = null) => {
   // Find all academic years
   const allYears = [...new Set(studentDocs.map(s => s.academicYear).filter(Boolean))];
   
@@ -115,6 +115,20 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = n
     if (isProf) depts[dept].profs++;
   });
   
+  if (sheetFacultyCounts) {
+    Object.keys(sheetFacultyCounts).forEach(dept => {
+      if (dept.includes('STUDENTS COUNT') || dept === 'UNKNOWN') return;
+      if (!depts[dept]) depts[dept] = { department: dept, yearlyData: {}, profs: 0, assocProfs: 0, asstProfs: 0 };
+    });
+  }
+  
+  if (sheetStudentCounts) {
+    Object.keys(sheetStudentCounts).forEach(dept => {
+      if (dept.includes('STUDENTS COUNT') || dept === 'UNKNOWN') return;
+      if (!depts[dept]) depts[dept] = { department: dept, yearlyData: {}, profs: 0, assocProfs: 0, asstProfs: 0 };
+    });
+  }
+  
   Object.keys(depts).forEach(dept => {
     if (dept === 'UNKNOWN') return;
     
@@ -128,8 +142,22 @@ export const calculateNBA_SFR = (studentDocs, facultyDocs, customTargetYears = n
       if (startYear === 0) return;
       
       // Students in this year for this dept
-      const sCount = countStudentsForYear(studentDocs, yearStr, dept);
-      const fCount = countFacultyForYear(facultyDocs, yearStr, dept);
+      let sCount = countStudentsForYear(studentDocs, yearStr, dept);
+      let fCount = countFacultyForYear(facultyDocs, yearStr, dept);
+      
+      if (sheetStudentCounts && sheetStudentCounts[dept]) {
+         const matchingYear = Object.keys(sheetStudentCounts[dept]).find(y => matchesAcademicYear(y, yearStr));
+         if (matchingYear) {
+            sCount = sheetStudentCounts[dept][matchingYear];
+         }
+      }
+      
+      if (sheetFacultyCounts && sheetFacultyCounts[dept]) {
+         const matchingYear = Object.keys(sheetFacultyCounts[dept]).find(y => matchesAcademicYear(y, yearStr));
+         if (matchingYear) {
+            fCount = sheetFacultyCounts[dept][matchingYear];
+         }
+      }
       
       const sfr = fCount > 0 ? (sCount / fCount) : 0;
       

@@ -9,10 +9,50 @@ import './Students.css';
 const Faculty = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedYear, setSelectedYear] = useState('2025-26');
+  const [rawFaculty, setRawFaculty] = useState([]);
   const [facultyList, setFacultyList] = useState([]);
   const [sheetData, setSheetData] = useState([]);
   const [sheetHeaders, setSheetHeaders] = useState([]);
   const [sheetTotal, setSheetTotal] = useState([]);
+
+  const [selectedYearSheetData, setSelectedYearSheetData] = useState(null);
+  const [isFetchingYearSheet, setIsFetchingYearSheet] = useState(false);
+
+  const parseCSV = (text) => {
+    const result = [];
+    let currentRow = [];
+    let currentCell = '';
+    let insideQuotes = false;
+    
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const nextChar = text[i + 1];
+      
+      if (char === '"' && insideQuotes && nextChar === '"') {
+        currentCell += '"';
+        i++;
+      } else if (char === '"') {
+        insideQuotes = !insideQuotes;
+      } else if (char === ',' && !insideQuotes) {
+        currentRow.push(currentCell);
+        currentCell = '';
+      } else if ((char === '\n' || char === '\r') && !insideQuotes) {
+        if (char === '\r' && nextChar === '\n') i++;
+        currentRow.push(currentCell);
+        result.push(currentRow);
+        currentRow = [];
+        currentCell = '';
+      } else {
+        currentCell += char;
+      }
+    }
+    if (currentCell !== '' || currentRow.length > 0) {
+      currentRow.push(currentCell);
+      result.push(currentRow);
+    }
+    return result;
+  };
 
   useEffect(() => {
     const fetchSheetData = async () => {
@@ -41,35 +81,95 @@ const Faculty = () => {
     fetchSheetData();
 
     const unsubscribe = onSnapshot(collection(db, 'faculty_members'), (snapshot) => {
-      const facultyMembers = snapshot.docs.map(doc => doc.data());
-
-      const depts = {};
-
-      facultyMembers.forEach(f => {
-        const dept = f.Department ? f.Department.toUpperCase() : 'UNKNOWN';
-        if (!depts[dept]) depts[dept] = { department: dept, profs: 0, assocProfs: 0, asstProfs: 0 };
-
-        const designation = (f.Designation || '').toLowerCase();
-        const isAsst = designation.includes('assistant') || designation.includes('asst');
-        const isAssoc = designation.includes('associate') || designation.includes('assoc');
-        const temp = designation
-          .replace(/(assistant|asst)\s*prof(essor)?/g, '')
-          .replace(/(associate|assoc)\s*prof(essor)?/g, '');
-        const isProf = temp.includes('professor') || temp.includes('prof');
-
-        if (isAsst) depts[dept].asstProfs++;
-        if (isAssoc) depts[dept].assocProfs++;
-        if (isProf) depts[dept].profs++;
-      });
-
-      const data = Object.values(depts);
-      data.sort((a, b) => a.department.localeCompare(b.department));
-      setFacultyList(data);
+      setRawFaculty(snapshot.docs.map(doc => doc.data()));
     }, (error) => {
       console.error("Firestore Error:", error);
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const depts = {};
+    const startYear = selectedYear === 'All Years' ? 0 : parseInt(selectedYear.substring(0, 4), 10);
+
+    rawFaculty.forEach(f => {
+      if (startYear > 0) {
+        const joinYear = parseInt(f.Joining_Year);
+        const leaveYear = parseInt(f.Leaving_Year);
+        if (isNaN(joinYear) || joinYear > startYear) return;
+        if (!isNaN(leaveYear) && leaveYear < startYear) return;
+      }
+
+      const dept = f.Department ? f.Department.toUpperCase() : 'UNKNOWN';
+      if (!depts[dept]) depts[dept] = { department: dept, profs: 0, assocProfs: 0, asstProfs: 0 };
+
+      const designation = (f.Designation || '').toLowerCase();
+      const isAsst = designation.includes('assistant') || designation.includes('asst');
+      const isAssoc = designation.includes('associate') || designation.includes('assoc');
+      const temp = designation
+        .replace(/(assistant|asst)\s*prof(essor)?/g, '')
+        .replace(/(associate|assoc)\s*prof(essor)?/g, '');
+      const isProf = temp.includes('professor') || temp.includes('prof');
+
+      if (isAsst) depts[dept].asstProfs++;
+      if (isAssoc) depts[dept].assocProfs++;
+      if (isProf) depts[dept].profs++;
+    });
+
+    const data = Object.values(depts);
+    data.sort((a, b) => a.department.localeCompare(b.department));
+    setFacultyList(data);
+  }, [rawFaculty, selectedYear]);
+
+  useEffect(() => {
+    const fetchYearSheetData = async () => {
+      if (!selectedYear) {
+        setSelectedYearSheetData(null);
+        return;
+      }
+      setIsFetchingYearSheet(true);
+      try {
+        const url = `https://docs.google.com/spreadsheets/d/1ZfMANlW5_VprTdR0NX1ROxm3_j0RwjdvRmgA_ZAAoqc/gviz/tq?tqx=out:csv&sheet=${selectedYear}`;
+        const response = await fetch(url);
+        const text = await response.text();
+        const lines = parseCSV(text);
+        
+        if (lines.length > 1) {
+          const deptsData = {};
+          let currentDept = 'General';
+
+          for (let i = 1; i < lines.length; i++) {
+            const row = lines[i];
+            if (!row[0] || row[0].trim() === '') continue;
+            
+            const isDeptHeading = row[0] && (!row[1] || row[1].trim() === '') && (!row[2] || row[2].trim() === '') && (!row[3] || row[3].trim() === '');
+            
+            if (isDeptHeading) {
+              currentDept = row[0].trim();
+              if (!deptsData[currentDept]) deptsData[currentDept] = [];
+            } else {
+              if (!deptsData[currentDept]) deptsData[currentDept] = [];
+              deptsData[currentDept].push({
+                name: row[0].trim(),
+                degree: (row[1] || '').trim() || '-',
+                designation: (row[2] || '').trim() || '-',
+                joinDate: (row[3] || '').trim() || '-'
+              });
+            }
+          }
+          setSelectedYearSheetData(deptsData);
+        } else {
+          setSelectedYearSheetData({});
+        }
+      } catch (err) {
+        console.error("Error fetching year sheet:", err);
+        setSelectedYearSheetData(null);
+      } finally {
+        setIsFetchingYearSheet(false);
+      }
+    };
+    fetchYearSheetData();
+  }, [selectedYear]);
 
   const filteredFaculty = facultyList.filter(f =>
     (f.department || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -81,64 +181,34 @@ const Faculty = () => {
         title="Faculty Aggregation"
         subtitle="Automatically calculated from individual records"
         actions={
-          <button className="btn btn-primary" onClick={() => navigate('/faculty-details')}>
-            <Users size={18} /> Manage Faculty Details
-          </button>
+          <div className="d-flex gap-3" style={{ alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-surface)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Year:</span>
+              <select 
+                value={selectedYear} 
+                onChange={(e) => setSelectedYear(e.target.value)}
+                style={{ 
+                  background: 'transparent', 
+                  border: 'none', 
+                  color: 'var(--text-main)',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontWeight: '500'
+                }}
+              >
+                <option value="2026-27">2026-27</option>
+                <option value="2025-26">2025-26</option>
+                <option value="2024-25">2024-25</option>
+                <option value="2023-24">2023-24</option>
+                <option value="2022-23">2022-23</option>
+              </select>
+            </div>
+            <button className="btn btn-primary" onClick={() => navigate('/faculty-details')}>
+              <Users size={18} /> Manage Faculty Details
+            </button>
+          </div>
         }
       />
-
-      <div className="table-container glass-panel">
-        <div className="table-toolbar">
-          <div className="search-bar">
-            <Search size={18} className="search-icon text-muted" />
-            <input
-              type="text"
-              placeholder="Search by department..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="search-input"
-            />
-          </div>
-        </div>
-
-        <div className="table-responsive">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Department</th>
-                <th>Professors</th>
-                <th>Associate Profs</th>
-                <th>Assistant Profs</th>
-                <th>Total Profs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredFaculty.length > 0 ? (
-                filteredFaculty.map((faculty, idx) => (
-                  <tr
-                    key={idx}
-                    onDoubleClick={() => navigate(`/faculty-details?dept=${encodeURIComponent(faculty.department)}`)}
-                    style={{ cursor: 'pointer' }}
-                    title={`Double click to view ${faculty.department} faculty`}
-                  >
-                    <td><span className={`badge-dept badge-${(faculty.department || 'cse').toLowerCase()}`}>{faculty.department || 'N/A'}</span></td>
-                    <td className="font-semibold">{faculty.profs}</td>
-                    <td className="font-semibold">{faculty.assocProfs}</td>
-                    <td className="font-semibold">{faculty.asstProfs}</td>
-                    <td className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-                      {faculty.profs + faculty.assocProfs + faculty.asstProfs}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="5" className="empty-state">No faculty members found. Add individuals in Faculty Details.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       <div className="table-container glass-panel" style={{ marginTop: '2rem' }}>
         <h3 style={{ padding: '1rem 1rem 0 1rem', color: 'var(--text-main)' }}>Faculty Count</h3>
@@ -184,6 +254,52 @@ const Faculty = () => {
           </table>
         </div>
       </div>
+
+      {selectedYear && (
+        <div className="table-container glass-panel" style={{ marginTop: '2rem' }}>
+          <h3 style={{ padding: '1rem 1rem 0 1rem', color: 'var(--text-main)', textAlign: 'center', marginBottom: '1rem' }}>Faculty Details ({selectedYear})</h3>
+          
+          {isFetchingYearSheet ? (
+             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading {selectedYear} data from Google Sheet...</div>
+          ) : selectedYearSheetData && Object.keys(selectedYearSheetData).length > 0 ? (
+             <div style={{ padding: '1rem' }}>
+               {Object.entries(selectedYearSheetData).map(([dept, members]) => (
+                 <div key={dept} style={{ marginBottom: '3rem', overflowX: 'auto' }}>
+                   <h4 style={{ marginBottom: '1rem', color: 'var(--text-main)', textAlign: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', fontWeight: '600', textTransform: 'uppercase' }}>
+                     {dept}
+                   </h4>
+                   <table className="data-table" style={{ border: '1px solid var(--border-color)', width: '100%', borderCollapse: 'collapse' }}>
+                     <thead>
+                       <tr>
+                         <th style={{ border: '1px solid var(--border-color)', textAlign: 'left', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px' }}>Name of the Faculty</th>
+                         <th style={{ border: '1px solid var(--border-color)', textAlign: 'left', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px' }}>Highest degree</th>
+                         <th style={{ border: '1px solid var(--border-color)', textAlign: 'left', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px' }}>Present Designation</th>
+                         <th style={{ border: '1px solid var(--border-color)', textAlign: 'left', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px' }}>Date of Joining</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {members.length > 0 ? members.map((m, idx) => (
+                         <tr key={idx}>
+                           <td style={{ border: '1px solid var(--border-color)', padding: '12px', fontWeight: '600' }}>{m.name}</td>
+                           <td style={{ border: '1px solid var(--border-color)', padding: '12px' }}>{m.degree}</td>
+                           <td style={{ border: '1px solid var(--border-color)', padding: '12px', whiteSpace: 'pre-line' }}>{m.designation}</td>
+                           <td style={{ border: '1px solid var(--border-color)', padding: '12px' }}>{m.joinDate}</td>
+                         </tr>
+                       )) : (
+                         <tr>
+                           <td colSpan="4" style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>No faculty members listed.</td>
+                         </tr>
+                       )}
+                     </tbody>
+                   </table>
+                 </div>
+               ))}
+             </div>
+          ) : (
+             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No detailed data available for {selectedYear}.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

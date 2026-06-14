@@ -33,7 +33,6 @@ const Sidebar = () => {
     { name: 'Faculty Retention', path: '/faculty-retention', icon: <UserSquare2 size={20} />, roles: ['admin', 'faculty'] },
     { name: 'SFR Analysis', path: '/sfr', icon: <Calculator size={20} />, roles: ['admin', 'faculty'] },
     { name: 'CADR Analysis', path: '/cadr', icon: <BarChart4 size={20} />, roles: ['admin', 'faculty'] },
-    { name: 'Department Analysis', path: '/department-analysis', icon: <Building2 size={20} />, roles: ['admin', 'faculty'] },
     { name: 'Reports', path: '/reports', icon: <FileText size={20} />, roles: ['admin', 'faculty'] },
   ];
 

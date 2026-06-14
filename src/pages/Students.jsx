@@ -8,7 +8,7 @@ import './Students.css';
 const Students = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [students, setStudents] = useState([]);
-  
+
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -27,44 +27,72 @@ const Students = () => {
   const [editingCell, setEditingCell] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // New Google Sheet Data State
+  // Top Sheet Data State
   const [sheetData, setSheetData] = useState([]);
   const [sheetHeaders, setSheetHeaders] = useState([]);
   const [sheetTotal, setSheetTotal] = useState([]);
 
-  // Fetch from Firebase and Google Sheet
+  // Fetch from Firebase
   useEffect(() => {
-    const fetchSheetData = async () => {
+    const fetchTopSheetData = async () => {
       try {
         const url = "https://docs.google.com/spreadsheets/d/1wAo9LA1LIc_SSwSMhNrB2DYWjBtoanmKqFhTbqPehPA/export?format=csv&gid=1323997071";
         const response = await fetch(url);
         const text = await response.text();
         const lines = text.trim().split('\n').map(line => line.split(','));
-        
+
         if (lines.length > 1) {
-          setSheetHeaders(lines[0]);
-          
+          setSheetHeaders([
+            { title: "CAY", subtitle: "(2025-2026)" },
+            { title: "CAYM1", subtitle: "(2024-2025)" },
+            { title: "CAYM2", subtitle: "(2023-2024)" }
+          ]);
+
           const dataRows = [];
+          let col1Sum = 0;
+          let col2Sum = 0;
+          let col3Sum = 0;
+
           for (let i = 1; i < lines.length; i++) {
-             if (lines[i][0] && lines[i][0].toLowerCase().includes('total students')) {
-               setSheetTotal(lines[i]);
-               break; 
+             const row = lines[i];
+             let deptRaw = row[0] ? row[0].replace(/^"|"$/g, '').trim() : '';
+             
+             if (!deptRaw || deptRaw.startsWith("DS=") || deptRaw.startsWith("AS=") || deptRaw.toLowerCase().includes("total students")) {
+                 continue;
              }
-             if (lines[i][0] && (lines[i][0].startsWith('DS=') || lines[i][0].startsWith('AS='))) {
-                continue;
+             
+             let deptName = deptRaw;
+             if (deptName.includes("-")) {
+                 deptName = deptName.split('-')[1].trim();
              }
-             if (lines[i][0] && lines[i][0].trim() !== '') {
-               dataRows.push(lines[i]);
-             }
+             if (deptName === "CSCY") deptName = "Cybersecurity";
+             if (deptName === "CSD") deptName = "CS & DESIGN";
+             if (deptName === "CSE" && deptRaw.startsWith("PG")) deptName = "PG";
+
+             const v1 = row[2] ? row[2].replace(/^"|"$/g, '').trim() : '0';
+             const v2 = row[3] ? row[3].replace(/^"|"$/g, '').trim() : '0';
+             const v3 = row[4] ? row[4].replace(/^"|"$/g, '').trim() : '0';
+
+             col1Sum += parseInt(v1, 10) || 0;
+             col2Sum += parseInt(v2, 10) || 0;
+             col3Sum += parseInt(v3, 10) || 0;
+
+             dataRows.push([
+                 deptName, 
+                 v1 === '0' ? '-' : v1, 
+                 v2 === '0' ? '-' : v2, 
+                 v3 === '0' ? '-' : v3
+             ]);
           }
+          
           setSheetData(dataRows);
+          setSheetTotal(["Sub-Total", col1Sum, col2Sum, col3Sum]);
         }
       } catch (err) {
-        console.error("Error fetching Google Sheet:", err);
+        console.error("Error fetching Google Sheet for top table:", err);
       }
     };
-
-    fetchSheetData();
+    fetchTopSheetData();
 
     const unsubscribe = onSnapshot(collection(db, 'students'), (snapshot) => {
       const studentData = snapshot.docs.map(doc => ({
@@ -123,11 +151,11 @@ const Students = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Cap lateral entry to 10% of total students
     const baseStudents = parseInt(formData.noOfStudents) || 0;
     let lateralEntry = parseInt(formData.noOfLateralEntry) || 0;
-    
+
     const maxLateral = Math.floor(baseStudents * 0.10);
     if (lateralEntry > maxLateral) {
       lateralEntry = maxLateral;
@@ -164,19 +192,19 @@ const Students = () => {
 
   const handleSyncFromSheet = async () => {
     if (!window.confirm("This will replace all current student data with the data from your Google Sheet. Are you sure?")) return;
-    
+
     setIsSyncing(true);
     try {
       const response = await fetch('https://docs.google.com/spreadsheets/d/1wAo9LA1LIc_SSwSMhNrB2DYWjBtoanmKqFhTbqPehPA/gviz/tq?tqx=out:csv');
       if (!response.ok) throw new Error("Failed to fetch Google Sheet");
       const csvText = await response.text();
-      
-      const lines = csvText.trim().split('\n').map(line => 
+
+      const lines = csvText.trim().split('\n').map(line =>
         line.split(',').map(field => field.replace(/^"|"$/g, ''))
       );
-      
+
       if (lines.length < 3) throw new Error("Invalid sheet format");
-      
+
       const headers = lines[0];
       const years = [
         headers[2].match(/\d{4}-\d{4}/)?.[0] || '2025-2026',
@@ -193,19 +221,19 @@ const Students = () => {
       for (let i = 1; i < lines.length; i++) {
         const row = lines[i];
         if (row.length < 8 || !row[0]) continue;
-        
+
         let dept = row[0].toUpperCase();
         if (dept === 'CS & DESIGN') dept = 'CS & DESIGN';
-        
+
         const studyYear = row[1];
         const cleanStudyYear = studyYear.replace(/ Year/i, '').trim();
-        
+
         for (let j = 0; j < 3; j++) {
-          const sanctionIntake = row[2 + j*2];
-          const lateralEntry = row[2 + j*2 + 1];
-          
+          const sanctionIntake = row[2 + j * 2];
+          const lateralEntry = row[2 + j * 2 + 1];
+
           if (!sanctionIntake || sanctionIntake === '0' || sanctionIntake === '-') continue;
-          
+
           promises.push(addDoc(collection(db, 'students'), {
             department: dept,
             academicYear: years[j],
@@ -216,7 +244,7 @@ const Students = () => {
           }));
         }
       }
-      
+
       await Promise.all(promises);
       alert("Successfully synced with Google Sheet!");
     } catch (error) {
@@ -231,7 +259,7 @@ const Students = () => {
     if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== 'Escape') {
       return;
     }
-    
+
     if (e.key === 'Escape') {
       setEditingCell(null);
       return;
@@ -246,7 +274,7 @@ const Students = () => {
     const processedValue = value.trim();
 
     if (processedValue === String(originalValue || '').trim()) {
-       return;
+      return;
     }
 
     try {
@@ -258,28 +286,28 @@ const Students = () => {
         let updates = { [field]: processedValue };
 
         if (field === 'studentCount') {
-           updates = {
-             noOfStudents: (parseInt(processedValue, 10) || 0).toString(),
-             noOfLateralEntry: '0'
-           };
+          updates = {
+            noOfStudents: (parseInt(processedValue, 10) || 0).toString(),
+            noOfLateralEntry: '0'
+          };
         } else if (field === 'noOfLateralEntry') {
-           const baseStudents = parseInt(record.noOfStudents, 10) || 0;
-           let lateralEntry = parseInt(processedValue, 10) || 0;
-           const maxLateral = Math.floor(baseStudents * 0.10);
-           if (lateralEntry > maxLateral) {
-             lateralEntry = maxLateral;
-             alert(`Lateral entry capped at 10% of Sanction Intake (${maxLateral})`);
-           }
-           updates.noOfLateralEntry = lateralEntry.toString();
+          const baseStudents = parseInt(record.noOfStudents, 10) || 0;
+          let lateralEntry = parseInt(processedValue, 10) || 0;
+          const maxLateral = Math.floor(baseStudents * 0.10);
+          if (lateralEntry > maxLateral) {
+            lateralEntry = maxLateral;
+            alert(`Lateral entry capped at 10% of Sanction Intake (${maxLateral})`);
+          }
+          updates.noOfLateralEntry = lateralEntry.toString();
         } else if (field === 'noOfStudents') {
-           const baseStudents = parseInt(processedValue, 10) || 0;
-           let lateralEntry = parseInt(record.noOfLateralEntry, 10) || 0;
-           const maxLateral = Math.floor(baseStudents * 0.10);
-           if (lateralEntry > maxLateral) {
-             updates.noOfLateralEntry = maxLateral.toString();
-             alert(`Lateral entry automatically adjusted to new 10% limit (${maxLateral})`);
-           }
-           updates.noOfStudents = baseStudents.toString();
+          const baseStudents = parseInt(processedValue, 10) || 0;
+          let lateralEntry = parseInt(record.noOfLateralEntry, 10) || 0;
+          const maxLateral = Math.floor(baseStudents * 0.10);
+          if (lateralEntry > maxLateral) {
+            updates.noOfLateralEntry = maxLateral.toString();
+            alert(`Lateral entry automatically adjusted to new 10% limit (${maxLateral})`);
+          }
+          updates.noOfStudents = baseStudents.toString();
         }
 
         await updateDoc(doc(db, 'students', recordId), updates);
@@ -288,16 +316,16 @@ const Students = () => {
         if (processedValue !== '') {
           let noOfStudentsStr = (field === 'noOfStudents' || field === 'studentCount') ? processedValue : '0';
           let noOfLateralEntryStr = field === 'noOfLateralEntry' ? processedValue : '0';
-          
+
           const baseStudents = parseInt(noOfStudentsStr, 10) || 0;
           let lateralEntry = parseInt(noOfLateralEntryStr, 10) || 0;
           const maxLateral = Math.floor(baseStudents * 0.10);
-          
+
           if (lateralEntry > maxLateral) {
-             lateralEntry = maxLateral;
-             if (field === 'noOfLateralEntry') {
-               alert(`Lateral entry capped at 10% of Sanction Intake (${maxLateral}). Please set Sanction Intake first.`);
-             }
+            lateralEntry = maxLateral;
+            if (field === 'noOfLateralEntry') {
+              alert(`Lateral entry capped at 10% of Sanction Intake (${maxLateral}). Please set Sanction Intake first.`);
+            }
           }
 
           const newData = {
@@ -313,8 +341,8 @@ const Students = () => {
       } else if (type === 'header') {
         const { dept, oldYear } = currentEditing;
         if (processedValue !== '') {
-          const recordsToUpdate = students.filter(s => 
-            (s.department || 'UNKNOWN') === dept && 
+          const recordsToUpdate = students.filter(s =>
+            (s.department || 'UNKNOWN') === dept &&
             s.academicYear === oldYear
           );
           for (const record of recordsToUpdate) {
@@ -331,20 +359,20 @@ const Students = () => {
   const renderEditableCell = (cellId, type, params, currentValue, displayValue, extraContent = null) => {
     const isSelected = selectedCell === cellId;
     const isEditing = editingCell && editingCell.id === cellId;
-    
+
     let content;
     if (isEditing) {
       content = (
-        <input 
+        <input
           autoFocus
           type="text"
           value={editingCell.value}
           onChange={(e) => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
           onBlur={handleCellBlurOrEnter}
           onKeyDown={handleCellBlurOrEnter}
-          style={{ 
-            width: '100%', height: '100%', boxSizing: 'border-box', 
-            textAlign: 'center', background: 'var(--bg-surface)', 
+          style={{
+            width: '100%', height: '100%', boxSizing: 'border-box',
+            textAlign: 'center', background: 'var(--bg-surface)',
             color: 'var(--text-main)', border: 'none', outline: 'none',
             fontFamily: 'inherit', fontSize: 'inherit', padding: '0',
             fontWeight: 'inherit'
@@ -353,7 +381,7 @@ const Students = () => {
       );
     } else {
       content = (
-        <div 
+        <div
           style={{ width: '100%', height: '100%', minHeight: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}
         >
           {displayValue}
@@ -363,23 +391,23 @@ const Students = () => {
     }
 
     return (
-      <div 
+      <div
         className={`google-sheet-cell ${isSelected ? 'selected' : ''}`}
         onClick={() => {
-           if (!isEditing) setSelectedCell(cellId);
+          if (!isEditing) setSelectedCell(cellId);
         }}
         onDoubleClick={() => {
-           setEditingCell({ id: cellId, type, ...params, originalValue: currentValue, value: currentValue || '' });
+          setEditingCell({ id: cellId, type, ...params, originalValue: currentValue, value: currentValue || '' });
         }}
         onFocus={() => {
-           if (!isEditing) setSelectedCell(cellId);
+          if (!isEditing) setSelectedCell(cellId);
         }}
-        style={{ 
-            width: '100%', height: '100%', cursor: 'cell', position: 'relative',
-            boxShadow: isSelected && !isEditing ? 'inset 0 0 0 2px #1a73e8' : 'none',
-            outline: 'none',
-            padding: '4px',
-            boxSizing: 'border-box'
+        style={{
+          width: '100%', height: '100%', cursor: 'cell', position: 'relative',
+          boxShadow: isSelected && !isEditing ? 'inset 0 0 0 2px #1a73e8' : 'none',
+          outline: 'none',
+          padding: '4px',
+          boxSizing: 'border-box'
         }}
         tabIndex={0}
         onKeyDown={(e) => {
@@ -402,31 +430,36 @@ const Students = () => {
     );
   };
 
-  const filteredStudents = students.filter(student => 
-    (student.department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (student.academicYear || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (student.year || student.semester || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredStudents = students.filter(student => {
+    const deptStr = (student.department || '').toUpperCase();
+    if (deptStr.includes('STUDENTS COUNT')) return false;
+
+    return (
+      (student.department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (student.academicYear || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (student.year || student.semester || '').toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   const getYearNumber = (str) => {
     const match = String(str).match(/\d{4}/);
     return match ? parseInt(match[0], 10) : 0;
   };
-  
+
   const allAcademicYears = [...new Set(filteredStudents.map(s => s.academicYear))].sort((a, b) => getYearNumber(b) - getYearNumber(a));
   const departments = [...new Set(filteredStudents.map(s => s.department || 'UNKNOWN'))].sort();
 
   const getStudentData = (dept, acYear, studyYear) => {
-    const matches = filteredStudents.filter(s => 
-      (s.department || 'UNKNOWN') === dept && 
-      s.academicYear === acYear && 
+    const matches = filteredStudents.filter(s =>
+      (s.department || 'UNKNOWN') === dept &&
+      s.academicYear === acYear &&
       (s.year || s.semester) === studyYear
     );
     if (matches.length === 0) return null;
-    
+
     const totalStudents = matches.reduce((sum, s) => sum + (parseInt(s.noOfStudents) || 0), 0);
     const totalLateral = matches.reduce((sum, s) => sum + (parseInt(s.noOfLateralEntry) || 0), 0);
-    
+
     return {
       id: matches[0].id,
       noOfStudents: totalStudents,
@@ -437,9 +470,9 @@ const Students = () => {
 
   return (
     <div className="page-view">
-      <Header 
-        title="Students Management" 
-        subtitle="View and manage enrolled students" 
+      <Header
+        title="Students Management"
+        subtitle="View and manage enrolled students"
         actions={
           <div className="d-flex gap-3">
             <button className="btn btn-secondary" onClick={handleSyncFromSheet} disabled={isSyncing} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -452,14 +485,39 @@ const Students = () => {
         }
       />
 
-      <div className="table-container glass-panel" style={{ marginBottom: '2rem' }}>
-        <h3 style={{ padding: '1rem 1rem 0 1rem', color: 'var(--text-main)' }}>Student Counts (From Google Sheet)</h3>
-        <div className="table-responsive">
-          <table className="data-table">
+      <div className="table-container glass-panel">
+        <div className="table-toolbar" style={{ marginBottom: '1.5rem' }}>
+          <div className="search-bar">
+            <Search size={18} className="search-icon text-muted" />
+            <input
+              type="text"
+              placeholder="Search by department or year..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="search-input"
+            />
+          </div>
+        </div>
+
+        <div className="table-responsive" style={{ marginBottom: '3rem' }}>
+          <table className="data-table" style={{ border: '1px solid var(--border-color)', width: '100%', borderCollapse: 'collapse', userSelect: 'none' }}>
             <thead>
               <tr>
+                <th colSpan="4" style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px', fontSize: '1rem', textTransform: 'uppercase' }}>
+                  STUDENTS COUNT ACADEMIC YEAR
+                </th>
+              </tr>
+              <tr>
+                <th style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px', verticalAlign: 'middle', textTransform: 'uppercase' }}>
+                  DEPARTMENT
+                </th>
                 {sheetHeaders.map((header, idx) => (
-                  <th key={idx}>{header || 'Department'}</th>
+                  <th key={idx} style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px' }}>
+                    <div style={{ fontWeight: 'bold', lineHeight: '1.4' }}>
+                      <div style={{ color: 'var(--text-main)', marginBottom: '2px', fontSize: '0.85rem' }}>{header.title}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 'normal' }}>{header.subtitle}</div>
+                    </div>
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -468,53 +526,30 @@ const Students = () => {
                 <>
                   {sheetData.map((row, rowIdx) => (
                     <tr key={rowIdx}>
-                      {row.map((cell, cellIdx) => {
-                        let displayCell = cell;
-                        if (cellIdx === 0 && cell) {
-                          const deptParts = cell.split('-');
-                          const rawDeptName = deptParts.length > 1 ? deptParts[1] : cell;
-                          displayCell = <span className={`badge-dept badge-${rawDeptName.toLowerCase()}`}>{cell}</span>;
-                        }
-                        return (
-                          <td key={cellIdx} className={cellIdx > 0 ? "font-semibold" : ""}>
-                            {displayCell}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                  {sheetTotal && sheetTotal.length > 0 && (
-                    <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', fontWeight: 'bold' }}>
-                      {sheetTotal.map((cell, cellIdx) => (
-                        <td key={cellIdx} className="font-semibold" style={{ color: cellIdx > 0 ? 'var(--color-primary)' : 'inherit' }}>
-                          {cellIdx === 0 ? 'Total' : cell}
+                      {row.map((cell, cellIdx) => (
+                        <td key={cellIdx} style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '12px' }}>
+                          <span style={{ fontWeight: cellIdx > 0 ? '600' : 'bold' }}>
+                            {cell}
+                          </span>
                         </td>
                       ))}
                     </tr>
-                  )}
+                  ))}
+                  <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
+                    {sheetTotal.map((cell, cellIdx) => (
+                      <td key={cellIdx} style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '12px', fontWeight: 'bold' }}>
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
                 </>
               ) : (
                 <tr>
-                  <td colSpan={sheetHeaders.length || 6} className="empty-state">Loading sheet data...</td>
+                  <td colSpan="4" className="empty-state">Loading sheet data...</td>
                 </tr>
               )}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <div className="table-container glass-panel">
-        <div className="table-toolbar" style={{ marginBottom: '1.5rem' }}>
-          <div className="search-bar">
-            <Search size={18} className="search-icon text-muted" />
-            <input 
-              type="text" 
-              placeholder="Search by department or year..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="search-input"
-            />
-          </div>
         </div>
 
         <div className="table-responsive">
@@ -536,38 +571,38 @@ const Students = () => {
                     </tr>
                     <tr>
                       {allAcademicYears.map((rawYear, idx) => {
-                         const cleanY = rawYear ? rawYear.replace(/^CAYm?\d?\s*\/?\s*\(?/gi, '').replace(/\)$/, '').trim() : '';
-                         const label = idx === 0 ? 'CAY' : (idx === 1 ? 'CAYm1' : `CAYm${idx}`);
-                         return (
-                            <th key={rawYear} style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: 0 }}>
-                              {renderEditableCell(`header-${dept}-${rawYear}`, 'header', { dept, oldYear: rawYear }, cleanY, (
-                                <div style={{ fontWeight: 'bold', lineHeight: '1.4', padding: '8px 0' }}>
-                                  <div style={{ color: 'var(--text-main)', marginBottom: '2px', fontSize: '0.85rem' }}>{label}</div>
-                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 'normal' }}>({cleanY})</div>
-                                </div>
-                              ))}
-                            </th>
-                         )
+                        const cleanY = rawYear ? rawYear.replace(/^CAYm?\d?\s*\/?\s*\(?/gi, '').replace(/\)$/, '').trim() : '';
+                        const label = idx === 0 ? 'CAY' : (idx === 1 ? 'CAYm1' : `CAYm${idx}`);
+                        return (
+                          <th key={rawYear} style={{ border: '1px solid var(--border-color)', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.02)', padding: 0 }}>
+                            {renderEditableCell(`header-${dept}-${rawYear}`, 'header', { dept, oldYear: rawYear }, cleanY, (
+                              <div style={{ fontWeight: 'bold', lineHeight: '1.4', padding: '8px 0' }}>
+                                <div style={{ color: 'var(--text-main)', marginBottom: '2px', fontSize: '0.85rem' }}>{label}</div>
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 'normal' }}>({cleanY})</div>
+                              </div>
+                            ))}
+                          </th>
+                        )
                       })}
                     </tr>
                   </thead>
                   <tbody>
-                     {(dept === 'PG' ? ['1st', '2nd'] : ['2nd', '3rd', '4th']).map(studyYear => (
-                       <tr key={studyYear}>
-                         <td style={{ border: '1px solid var(--border-color)', fontWeight: 'bold', textAlign: 'center' }}>{studyYear} Year</td>
-                         {allAcademicYears.map(year => {
-                           const data = getStudentData(dept, year, studyYear);
-                           return (
-                             <td key={year + studyYear} style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '0' }}>
-                               {data ? (
-                                 renderEditableCell(`data-${data.id}-studentCount`, 'data', { recordId: data.id, field: 'studentCount' }, data.noOfStudents + data.noOfLateralEntry, data.noOfStudents + data.noOfLateralEntry)
-                               ) : (
-                                 renderEditableCell(`newdata-${dept}-${year}-${studyYear}-studentCount`, 'newData', { dept, acYear: year, studyYear, field: 'studentCount' }, '', '-')
-                               )}
-                             </td>
-                           );
-                         })}
-                       </tr>
+                    {(dept === 'PG' ? ['1st', '2nd'] : ['2nd', '3rd', '4th']).map(studyYear => (
+                      <tr key={studyYear}>
+                        <td style={{ border: '1px solid var(--border-color)', fontWeight: 'bold', textAlign: 'center' }}>{studyYear} Year</td>
+                        {allAcademicYears.map(year => {
+                          const data = getStudentData(dept, year, studyYear);
+                          return (
+                            <td key={year + studyYear} style={{ border: '1px solid var(--border-color)', textAlign: 'center', padding: '0' }}>
+                              {data ? (
+                                renderEditableCell(`data-${data.id}-studentCount`, 'data', { recordId: data.id, field: 'studentCount' }, data.noOfStudents + data.noOfLateralEntry, data.noOfStudents + data.noOfLateralEntry)
+                              ) : (
+                                renderEditableCell(`newdata-${dept}-${year}-${studyYear}-studentCount`, 'newData', { dept, acYear: year, studyYear, field: 'studentCount' }, '', '-')
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
                     ))}
                     <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', fontWeight: 'bold' }}>
                       <td style={{ border: '1px solid var(--border-color)', textAlign: 'center' }}>Sub-Total</td>
