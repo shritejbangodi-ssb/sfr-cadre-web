@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Users } from 'lucide-react';
+import { Search, Users, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -203,8 +203,8 @@ const Faculty = () => {
                 <option value="2022-23">2022-23</option>
               </select>
             </div>
-            <button className="btn btn-primary" onClick={() => navigate('/faculty-details')}>
-              <Users size={18} /> Manage Faculty Details
+            <button className="btn btn-primary" onClick={() => window.location.reload()}>
+              <RefreshCw size={18} /> Sync Data
             </button>
           </div>
         }

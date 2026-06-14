@@ -139,6 +139,7 @@ const SFR = () => {
               students: d.totalStudents3Years,
               faculty: d.maxFacultySeen,
               currentSfr: d.averageSFR,
+              points: d.points,
               yearlyData: d.yearlyData
             };
           });
@@ -196,6 +197,7 @@ const SFR = () => {
                   <th key={year}>{year} SFR</th>
                 ))}
                 <th>Average SFR</th>
+                <th>SFR Marks (Out of 30)</th>
               </tr>
             </thead>
             <tbody>
@@ -211,11 +213,14 @@ const SFR = () => {
                       </td>
                     ))}
                     <td className="font-semibold">{row.currentSfr.toFixed(2)}</td>
+                    <td className="font-semibold" style={{ color: row.points >= 26 ? 'var(--color-success)' : row.points > 0 ? 'var(--color-warning)' : 'var(--color-danger)' }}>
+                      {row.points}
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={targetYears.length + 2} className="empty-state">No data available. Add students and faculty!</td>
+                  <td colSpan={targetYears.length + 3} className="empty-state">No data available. Add students and faculty!</td>
                 </tr>
               )}
             </tbody>
