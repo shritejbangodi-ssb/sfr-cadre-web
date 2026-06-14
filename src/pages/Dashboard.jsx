@@ -20,7 +20,6 @@ import {
   getCurrentAcademicYearStart,
   formatAcademicYear,
   buildCAYDetails,
-  buildFacultyQualifications,
 } from '../utils/sfrCalculator';
 import Header from '../components/Header';
 import './Dashboard.css';
@@ -40,7 +39,6 @@ const Dashboard = () => {
 
   const [sfrData, setSfrData] = useState([]);
   const [cayDetails, setCayDetails] = useState([]);
-  const [fqDetails, setFqDetails] = useState([]);
 
   const targetYears = getAcademicYearsInRange(startYear, endYear);
 
@@ -171,7 +169,6 @@ const Dashboard = () => {
             });
           }
           setCayDetails(baseCayDetails);
-          setFqDetails(buildFacultyQualifications(facultyDocs, years));
         });
       };
 
@@ -282,35 +279,6 @@ const Dashboard = () => {
       />
 
       <div className="stats-grid">
-        <div className="cay-details-card dashboard-block">
-          <div className="cay-details-header">
-            <h4>Faculty Qualification</h4>
-            <span className="cay-details-range">
-              {startYear} – {endYear}
-            </span>
-          </div>
-          {fqDetails.length > 0 ? (
-            <div className="cay-details-table">
-              <div className="cay-details-row cay-details-head">
-                <span>Year</span>
-                <span>Academic Year</span>
-                <span>PHD</span>
-                <span>M.TECH</span>
-              </div>
-              {fqDetails.map((row) => (
-                <div key={row.label} className="cay-details-row">
-                  <span className="cay-label">{row.label}</span>
-                  <span>{row.academicYear}</span>
-                  <span className="cay-count">{row.phd}</span>
-                  <span className="cay-count">{row.mtech}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="cay-details-empty">Set a valid 3-year academic range above.</p>
-          )}
-        </div>
-
         <div className="cay-details-card dashboard-block">
           <div className="cay-details-header">
             <h4>CAY Details</h4>

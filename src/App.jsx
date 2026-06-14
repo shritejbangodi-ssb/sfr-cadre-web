@@ -12,7 +12,6 @@ import CADR from './pages/CADR';
 import DepartmentAnalysis from './pages/DepartmentAnalysis';
 import Reports from './pages/Reports';
 import FacultyDetails from './pages/FacultyDetails';
-import FacultyQualification from './pages/FacultyQualification';
 import FacultyRetention from './pages/FacultyRetention';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -44,7 +43,6 @@ const AppRoutes = () => {
       <Route path="/dashboard" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><Dashboard /></ProtectedRoute>} />
       <Route path="/students" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><Students /></ProtectedRoute>} />
       <Route path="/faculty" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><Faculty /></ProtectedRoute>} />
-      <Route path="/faculty-qualification" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><FacultyQualification /></ProtectedRoute>} />
       <Route path="/faculty-retention" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><FacultyRetention /></ProtectedRoute>} />
       <Route path="/sfr" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><SFR /></ProtectedRoute>} />
       <Route path="/cadr" element={<ProtectedRoute allowedRoles={['admin', 'faculty']}><CADR /></ProtectedRoute>} />
