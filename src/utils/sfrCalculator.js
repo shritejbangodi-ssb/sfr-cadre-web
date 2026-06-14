@@ -231,3 +231,65 @@ export const buildFacultyQualifications = (facultyDocs, targetYears) => {
   });
 };
 
+export const parseExperience = (expStr) => {
+  if (expStr === null || expStr === undefined) return 0;
+  const str = String(expStr).trim().toLowerCase();
+  if (!str || str === '-' || str === 'na' || str === 'n/a') return 0;
+  
+  // Case 1: e.g. "10M", "3m", "10 months"
+  if (str.endsWith('m') || str.includes('month')) {
+    const months = parseInt(str) || 0;
+    return months / 12;
+  }
+  
+  // Case 2: e.g. "1.1", "1.11", "18.4"
+  if (str.includes('.')) {
+    const parts = str.split('.');
+    const years = parseInt(parts[0]) || 0;
+    const months = parseInt(parts[1]) || 0;
+    return years + (months / 12);
+  }
+  
+  // Case 3: e.g. "2", "9", "26"
+  return parseFloat(str) || 0;
+};
+
+export const calculateFacultyRetentionForYear = (facultyDocs, yearOffset, RF) => {
+  let A = 0;
+  let B = 0;
+  let C = 0;
+  let D = 0;
+  let E = 0;
+  let AF = 0;
+
+  facultyDocs.forEach(f => {
+    const currentExp = parseExperience(f.Experience || f.experience);
+    const historicalExp = currentExp - yearOffset;
+    if (historicalExp < 0) {
+      return;
+    }
+    
+    AF++;
+    if (historicalExp < 1.0) {
+      A++;
+    } else if (historicalExp < 2.0) {
+      B++;
+    } else if (historicalExp < 3.0) {
+      C++;
+    } else if (historicalExp < 4.0) {
+      D++;
+    } else {
+      E++;
+    }
+  });
+
+  const numTerm = (A * 0) + (B * 1) + (C * 2) + (D * 3) + (E * 4);
+  const rawPoints = RF > 0 ? (numTerm / RF) * 2.50 : 0;
+  const points = Math.min(rawPoints, 10.0);
+
+  return {
+    A, B, C, D, E, AF, RF, points: parseFloat(points.toFixed(2))
+  };
+};
+
+
