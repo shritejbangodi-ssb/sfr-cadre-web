@@ -136,7 +136,7 @@ const Faculty = () => {
         
         if (lines.length > 1) {
           const deptsData = {};
-          let currentDept = 'General';
+          let currentDept = 'AIML';
 
           for (let i = 1; i < lines.length; i++) {
             const row = lines[i];
